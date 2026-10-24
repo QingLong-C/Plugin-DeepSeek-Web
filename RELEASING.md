@@ -1,5 +1,11 @@
 # 发布流程
 
+## 仅更新维护文档
+
+纯维护说明或排障指引更新可以只提交并推送文档，保持插件版本、锁文件、源码和已验收安装不变。先审查完整差异，运行 `pnpm check:repo` 验证仓库与文档引用；默认完整离线检查仍按 AGENTS.md 执行。不运行 `release:prepare`、不重新打包、不移动既有标签或覆盖 Release 资产；GitHub main 的文档可以新于发行标签，用户安装仍以原 Release 包及其校验值为准。
+
+## 发布新的插件版本
+
 本维护版只发布 GitHub Release；不执行 npm publish。使用与 package.json 一致的新版本，更新 CHANGELOG、README 与维护说明，保留 MIT 来源。
 
 1. 运行 `pnpm install --frozen-lockfile`、`pnpm check`，审查源码和打包内容，不提交凭据、日志、浏览器资料及私有证据。
