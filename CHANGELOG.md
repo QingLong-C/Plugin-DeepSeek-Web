@@ -1,6 +1,6 @@
 # Personal maintained edition
 
-## 0.2.0-qinglong.6
+## 0.2.0-qinglong.6 (2026-10-25)
 
 - 每步发送绑定请求/工具目录的本地 strict 返回契约，完整执行原始工具与最终输出 JSON Schema。
 - 新增固定版本 Ajv/ajv-formats，支持三种常见方言；生成前拒绝不能完整校验的规则。保留宿主校验、有限格式恢复和全部已有兼容补丁。
