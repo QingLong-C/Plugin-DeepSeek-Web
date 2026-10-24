@@ -1,0 +1,44 @@
+{
+  "package": "dsh-tokenfree",
+  "referenceVersion": "0.2.0",
+  "files": {
+    "lib/dsh/adapter.js": {
+      "payload": "adapter.js",
+      "sha256": "9ea05fa1d52fbfc37337e0c97b6a497328decb91cc3e54dfa399c4ba0671a9d1",
+      "acceptedHashes": [
+        "1f357af146fc2f1b05bba1731044514e898a1fe4d0610a21f70a32df7ab5e793",
+        "66e3c1e7deb88a0924c1c890bca7aef76aff3fe865104304d0371724d00c454a",
+        "9ea05fa1d52fbfc37337e0c97b6a497328decb91cc3e54dfa399c4ba0671a9d1"
+      ],
+      "allowMissing": false
+    },
+    "lib/dsh/index.js": {
+      "payload": "index.js",
+      "sha256": "9836c486d23499fbdb730fd58babe2bfda0a417d8478e0853a937cdc4595865a",
+      "acceptedHashes": [
+        "026d19a52606f6335a2ed3cda733f78065af75d944d83ab23612c241f9d6d56e",
+        "195164bd33cc410533a9fe543309a0cf2dbcc4d11a9fc481a786a88668b730c8",
+        "9836c486d23499fbdb730fd58babe2bfda0a417d8478e0853a937cdc4595865a",
+        "b41741b2f419b3161cf2d00f45fb00dbca03295fd7ea14123d42d8858c277305"
+      ],
+      "allowMissing": false
+    },
+    "lib/dsh/compaction.js": {
+      "payload": "compaction.js",
+      "sha256": "0587e05466759da72a5699ad5c1bd8c5d0859a96dde4c49adffcb9d071295002",
+      "acceptedHashes": [
+        "0587e05466759da72a5699ad5c1bd8c5d0859a96dde4c49adffcb9d071295002",
+        "b558820a09ea3748984811dd7b786c75aba67e040a2ad8f832efeee02e43fc06"
+      ],
+      "allowMissing": false
+    },
+    "lib/dsh/schema-sanitize.js": {
+      "payload": "schema-sanitize.js",
+      "sha256": "7ddb1711152d4d105568b3b0d3a2f4b0b66fa5d5016e6c6f55c892e2219face9",
+      "acceptedHashes": [
+        "7ddb1711152d4d105568b3b0d3a2f4b0b66fa5d5016e6c6f55c892e2219face9"
+      ],
+      "allowMissing": true
+    }
+  }
+}

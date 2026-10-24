@@ -1,0 +1,22 @@
+{
+  "name": "dsh-tokenfree",
+  "version": "0.2.0-local-compat",
+  "private": true,
+  "type": "module",
+  "description": "Local compatibility loader for the installed TokenFree package.",
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    }
+  }
+}
