@@ -11,6 +11,29 @@ import { LocalDiagnostics } from '../lib/local/diagnostics.js'
 const base = () => ({ provider: PROVIDER, model: MODEL, messages: [{ role: 'user', content: [{ type: 'text', text: 'Read the marker and answer.' }] }] })
 const adapterFor = f => new TokenFreeAdapter({}, { store: f.store, diagnostics: f.log, credential: async () => ({ token: 'fixture-secret-token', accountId: 'fixture-owner' }), client: (_, c) => f.web.client(f.log, c.operationId) })
 
+test('strict original schemas reject the whole batch before any native tool is delivered', async () => {
+  const f = await setup(), adapter = adapterFor(f), chunks = []
+  const constrained = { ...tool, parameters: { type: 'object', properties: { count: { type: 'integer', minimum: 2 } }, required: ['count'], additionalProperties: false } }
+  f.web.answer = p => ({ protocol_version: 1, request_id: p.request_id, kind: 'tool', calls: [
+    { name: tool.name, arguments: { count: 2 } }, { name: tool.name, arguments: { count: 1 } }] })
+  try {
+    await assert.rejects(async () => { for await (const c of adapter.stream({ ...base(), tools: [constrained] })) chunks.push(c) }, e => e.code === 'INVALID_TOOL_CALL')
+    assert.equal(chunks.some(c => c.blockType === 'tool-call' || c.block?.type === 'tool-call'), false)
+    assert.equal(f.web.generations.length, 1, 'do not regenerate or invent missing values')
+  } finally { await adapter.dispose(); await f.close() }
+})
+
+test('unsupported original schemas fail before credentials or web generation', async () => {
+  const f = await setup()
+  let credentials = 0
+  const adapter = new TokenFreeAdapter({}, { store: f.store, credential: async () => { credentials++; return { token: 'fixture', accountId: 'fixture' } } })
+  try {
+    await assert.rejects(() => collect(adapter.stream({ ...base(), tools: [{ ...tool, parameters: { type: 'object', unknownConstraint: true } }] })), e => e.code === 'UNSUPPORTED_SCHEMA')
+    assert.equal(credentials, 0)
+    assert.equal(f.web.generations.length, 0)
+  } finally { await adapter.dispose(); await f.close() }
+})
+
 test('recovered DSML arguments pass the real adapter once, retain policy/schema checks, and log no raw arguments', async () => {
   const f = await setup(home => new LocalDiagnostics(home, false)), adapter = adapterFor(f)
   f.web.answer = () => '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read_marker"><｜｜DSML｜｜ parameter name="arguments" string="false">{}}</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>'

@@ -1,5 +1,12 @@
 # Personal maintained edition
 
+## 0.2.0-qinglong.6
+
+- 每步发送绑定请求/工具目录的本地 strict 返回契约，完整执行原始工具与最终输出 JSON Schema。
+- 新增固定版本 Ajv/ajv-formats，支持三种常见方言；生成前拒绝不能完整校验的规则。保留宿主校验、有限格式恢复和全部已有兼容补丁。
+- 不补默认、不强转、不删参数；非法混合批次全部拒绝，不为参数错误额外生成。规则错误显示直观中文原因。
+- 该能力属于本地校验，不是官网服务端 strict 开关。
+
 ## 0.2.0-qinglong.5 (2026-10-25)
 
 - Recover bounded JSON punctuation defects in complete DSML parameters and JSON response envelopes: redundant root closers, trailing commas, missing closing delimiters after complete values, and whole-response fences. Decode one encoded arguments object where the schema does not declare a literal arguments property.

@@ -98,6 +98,8 @@ test('malformed, duplicate, multiple, fenced or schema-invalid final values neve
  for(const [text,output,extra]of [
   ['{"a":1,"a":2}',{type:'json'}],['{} {}',{type:'json'}],['```json\n{}\n```',{type:'json'}],
   ['[1,"2"]',{type:'schema',schema:{type:'array',items:{type:'integer'}}}],
+  ['"too short"',{type:'schema',schema:{type:'string',minLength:20}}],
+  ['{"n":0}',{type:'schema',schema:{type:'object',properties:{n:{type:'integer',minimum:1}}}}],
   ['{"n":1,"extra":2}',{type:'schema',schema:{type:'object',properties:{n:{type:'integer'}},required:['n'],additionalProperties:false}}],
   ['{"n":1}',{type:'json'},{stop:['1']}]
  ]){

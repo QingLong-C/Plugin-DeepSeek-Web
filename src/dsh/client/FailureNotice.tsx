@@ -8,12 +8,13 @@ type Props = ChatNodeViewProps<'turn-error'>
 /** Explain TokenFree withdrawal/format errors; other rows retain their shipped renderer. */
 export function FailureNotice({ fallback: Fallback, ...props }: Props & { fallback: ComponentType<Props> }) {
   const { code, message } = props.node.data
-  if (code !== 'CONTENT_RETRACTED' && code !== 'WEB_TOOL_FORMAT') return <Fallback {...props} />
+  if (!['CONTENT_RETRACTED', 'WEB_TOOL_FORMAT', 'INVALID_TOOL_CALL', 'OUTPUT_SCHEMA'].includes(code ?? '')) return <Fallback {...props} />
   // Older persisted errors already carry the explicit upstream status in their message.
   const filtered = /\bCONTENT_FILTER\b/.test(message)
+  const schema = code === 'INVALID_TOOL_CALL' || code === 'OUTPUT_SCHEMA'
   const format = code === 'WEB_TOOL_FORMAT'
-  const title = format ? '工具参数格式错误' : filtered ? '官网内容过滤' : '官网撤回了回答'
-  const explanation = format ? '未获得可执行的完整工具参数，本步骤未执行。可重试本步，之前的操作不会自动回滚。' : filtered
+  const title = schema ? code === 'OUTPUT_SCHEMA' ? '回答格式不符合规则' : '工具参数不符合规则' : format ? '工具参数格式错误' : filtered ? '官网内容过滤' : '官网撤回了回答'
+  const explanation = schema ? '返回结果未通过声明的格式规则，本步骤未执行工具；之前的操作不会自动回滚。' : format ? '未获得可执行的完整工具参数，本步骤未执行。可重试本步，之前的操作不会自动回滚。' : filtered
     ? 'DeepSeek 官网拦截或撤回了本次回答。'
     : 'DeepSeek 官网撤回了本次回答，未提供具体原因。'
   return <div role="status" style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0', fontSize: 'var(--dsh-content-font-size-secondary, 13px)', overflowWrap: 'anywhere' }}>

@@ -1,6 +1,6 @@
 {
   "name": "dsh-tokenfree",
-  "version": "0.2.0-qinglong.5",
+  "version": "0.2.0-qinglong.6",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QingLong-C/Plugin-TokenFree.git"
@@ -93,7 +93,8 @@
     "MAINTENANCE.md",
     "src/dsh/schema-sanitize.ts",
     "src/dsh/compaction.ts",
-    "src/dsh/index.ts"
+    "src/dsh/index.ts",
+    "src/dsh/strict-schema.ts"
   ],
   "engines": {
     "node": "^22.19.0 || >=24",
@@ -139,8 +140,8 @@
     "@deepseek-ai/dsh-agent-preset-registry": "0.2.1-rc.3",
     "@deepseek-ai/dsh-api-gateway": "0.2.1-rc.3",
     "@deepseek-ai/dsh-api-session-controller": "0.2.1-rc.3",
-    "@deepseek-ai/dsh-client-ui-conversation": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-chat": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-session": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-settings": "0.2.1-rc.3",
@@ -196,6 +197,8 @@
   },
   "license": "MIT",
   "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "playwright-core": "1.61.1",
     "zod": "4.6.6"
   },

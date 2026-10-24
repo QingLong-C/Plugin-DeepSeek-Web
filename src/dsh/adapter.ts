@@ -2,6 +2,7 @@ import { LlmAdapter, LlmError, ReasoningEffortId, ToolCallId, attributionHeaders
 import type { GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, StreamChunk, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import { sanitizeJsonSchema } from './schema-sanitize.js'
+import { StrictSchemas } from './strict-schema.js'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { dirname, resolve, basename, join } from 'node:path'
 import { realpath } from 'node:fs/promises'
@@ -45,6 +46,7 @@ function nativeBlock(block: Block): ContentBlock {
   return block.type === 'tool-call' ? { ...block, id: ToolCallId(block.id) } : block
 }
 export class TokenFreeAdapter extends LlmAdapter {
+  private readonly schemas = new StrictSchemas()
   private readonly lifetime = new AbortController()
   private readonly store: LocalStore
   private readonly summaries = new Map<string, { anchor: CompactionAnchor; controller: AbortController; operationId?: string }>()
@@ -110,7 +112,7 @@ export class TokenFreeAdapter extends LlmAdapter {
   async policy(sessionId: string) { return this.store.policy((await this.engine()).key(sessionId)) }
   async setPolicy(sessionId: string, value: SessionPolicy) {
     const policy = parsePolicy(value, schema => {
-      try { assertSupportedJsonSchema(sanitizeJsonSchema(schema)) }
+      try { assertSupportedJsonSchema(sanitizeJsonSchema(schema)); this.schemas.prepare(schema) }
       catch (error) { throw new TokenFreeError(error instanceof Error ? error.message : 'Unsupported output schema.', 'UNSUPPORTED_SCHEMA') }
     })
     const state = await this.store.setPolicy((await this.engine()).key(sessionId), policy)
@@ -188,13 +190,14 @@ export class TokenFreeAdapter extends LlmAdapter {
       if (policy) {
         const { revision: _, ...settings } = policy
         parsePolicy(settings, schema => {
-          try { assertSupportedJsonSchema(sanitizeJsonSchema(schema)) }
+          try { assertSupportedJsonSchema(sanitizeJsonSchema(schema)); this.schemas.prepare(schema) }
           catch (error) { throw new TokenFreeError(error instanceof Error ? error.message : 'Unsupported output schema.', 'UNSUPPORTED_SCHEMA') }
         })
       }
       const selected = allowedTools([...(options.tools ?? [])].filter(x => x.name !== 'web_search'), policy ?? defaultPolicy())
+      if (new Set(selected.map(tool => tool.name)).size !== selected.length) throw new TokenFreeError('工具目录名称重复；未发送网页请求。', 'UNSUPPORTED_SCHEMA')
       for (const tool of selected) {
-        try { assertSupportedJsonSchema(sanitizeJsonSchema(tool.parameters)) }
+        try { assertSupportedJsonSchema(sanitizeJsonSchema(tool.parameters)); this.schemas.prepare(tool.parameters) }
         catch (error) { throw new TokenFreeError(error instanceof Error ? error.message : 'Unsupported tool schema.', 'UNSUPPORTED_SCHEMA') }
       }
       const input = modelInput({ ...options, tools: selected, thinking: summary?.thinking ?? options.reasoningEffort !== 'off' })
@@ -227,11 +230,13 @@ export class TokenFreeAdapter extends LlmAdapter {
           return [{ type: 'text', text }]
         }
         const blocks = decodeResponse(text, input.tools, id, (tool, value) => {
-        assertSupportedJsonSchema(sanitizeJsonSchema(tool.parameters))
-        const issues = validateJsonSchemaValue(tool.parameters, value)
-        if (issues.length) throw new TokenFreeError(`Tool ${tool.name} arguments failed schema validation: ${issues[0]}`, 'INVALID_TOOL_CALL')
+          this.schemas.check(tool.parameters, value)
+          assertSupportedJsonSchema(sanitizeJsonSchema(tool.parameters))
+          const issues = validateJsonSchemaValue(tool.parameters, value)
+          if (issues.length) throw new TokenFreeError(`Tool ${tool.name} arguments failed schema validation: ${issues[0]}`, 'INVALID_TOOL_CALL')
         }, () => log?.write('model.format-repair', { operationId, stage: 'local-syntax', attempt: 1 }))
         if (input.policy) validatePolicyResult(blocks, input.policy, input.stop, (schema, value) => {
+          this.schemas.check(schema, value, 'OUTPUT_SCHEMA')
           assertSupportedJsonSchema(sanitizeJsonSchema(schema))
           const issues = validateJsonSchemaValue(schema, value)
           if (issues.length) throw new TokenFreeError(`Final JSON failed schema validation: ${issues[0]}`, 'OUTPUT_SCHEMA')
