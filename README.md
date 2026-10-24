@@ -2,7 +2,7 @@
 
 让 DSH 使用你自己的 DeepSeek 网页账号进行对话、调用 DSH 工具和处理长对话，无需填写付费 API Key。模型在 DeepSeek 服务器运行，插件不新增代理监听端口。
 
-这是在 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) 上整合兼容修复的独立维护仓库，保留原项目 MIT 许可与贡献者署名。当前版本 **0.2.0-qinglong.1**，基线为上游 **v0.2.0**。
+这是在 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) 上整合兼容修复的独立维护仓库，保留原项目 MIT 许可与贡献者署名。当前版本 **0.2.0-qinglong.2**，基线为上游 **v0.2.0**。
 
 ## 整合了什么
 
@@ -15,7 +15,7 @@
 
 支持基线：macOS、DSH **0.2.1-rc.3**、已安装 Google Chrome。
 
-1. 在 [Releases](https://github.com/QingLong-C/dsh-tokenfree/releases) 下载本仓库发布的 `.tgz` 与 `SHA256SUMS`，校验后按 [安装与迁移说明](MAINTENANCE.md) 安装到目标 DSH profile。这个版本只发布 GitHub 安装包，没有发布到 npm。
+1. 在 [Releases](https://github.com/QingLong-C/Plugin-TokenFree/releases) 下载本仓库发布的 `.tgz` 与 `SHA256SUMS`，校验后按 [安装与迁移说明](MAINTENANCE.md) 安装到目标 DSH profile。这个版本只发布 GitHub 安装包，没有发布到 npm。
 2. 重启 DSH，打开「设置 → TokenFree」，在专用 Chrome 窗口中登录自己的 DeepSeek 账号。
 3. 点击「使用」，或选择 **TokenFree · DeepSeek Web**。点击「使用」也会设为当前 profile 的默认模型。
 

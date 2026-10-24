@@ -1,14 +1,14 @@
 {
   "name": "dsh-tokenfree",
-  "version": "0.2.0-qinglong.1",
+  "version": "0.2.0-qinglong.2",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/QingLong-C/dsh-tokenfree.git"
+    "url": "git+https://github.com/QingLong-C/Plugin-TokenFree.git"
   },
   "bugs": {
-    "url": "https://github.com/QingLong-C/dsh-tokenfree/issues"
+    "url": "https://github.com/QingLong-C/Plugin-TokenFree/issues"
   },
-  "homepage": "https://github.com/QingLong-C/dsh-tokenfree#readme",
+  "homepage": "https://github.com/QingLong-C/Plugin-TokenFree#readme",
   "packageManager": "pnpm@10.12.1",
   "description": "TokenFree personal maintained edition with DSH schema, long-conversation and model-switch compatibility fixes.",
   "type": "module",

@@ -41,12 +41,10 @@ pnpm check
 - 合成最小复现可以提交；凭据、个人路径、真实 chat URL、原始日志、截图和浏览器配置不能提交。完整证据留在本机 research 或 .local。
 - 更新 pnpm-lock.yaml 与依赖声明必须同一 PR；不使用 file/link 依赖或依赖工作区提升。
 
-[公开仓库](https://github.com/yuezengwu/dsh-tokenfree)包含四组模块、测试与 CI。安全渠道状态见 [安全报告](SECURITY.md)，不填写不存在的邮箱。代码以现有 MIT 许可贡献，不额外要求 CLA。讨论对事、尊重贡献者，不提供响应时限承诺。
+[公开仓库](https://github.com/QingLong-C/Plugin-TokenFree)包含四组模块和离线测试。安全渠道状态见 [安全报告](SECURITY.md)，不填写不存在的邮箱。代码以现有 MIT 许可贡献，不额外要求 CLA。讨论对事、尊重贡献者，不提供响应时限承诺。
 
-## CI 与发布
+## 检查与发布
 
-GitHub CI 在 Ubuntu Node 22/24 与 macOS Node 24 执行 `pnpm check`，不使用账号 secrets、不启动 Chrome、不发布包。它证明离线基础兼容，不等于支持 Linux 真实登录或已验收三端。
+本维护版未配置远程 CI。运行 `pnpm check` 进行构建、类型、离线回归和打包检查；不得把本地通过描述成远程 CI 或真实账号验收通过。新增 CI 需要单独配置仓库权限，不能保存网页账号凭据。
 
-工作流只读仓库，Actions 固定提交；基于 [checkout](https://github.com/actions/checkout)、[setup-node](https://github.com/actions/setup-node) 与 [pnpm setup](https://github.com/pnpm/action-setup) 的公开用法配置。每次发行须核对同一提交的远程运行结果。
-
-发布步骤见 [发布流程](RELEASING.md)，版本维护见 [开源维护策略](OPEN_SOURCE.md)，安全报告见 [SECURITY.md](SECURITY.md)。
+本仓库只发布 GitHub 安装包，不向 npm 发布同名包。发布步骤见 [发布流程](RELEASING.md)，版本维护见 [开源维护策略](OPEN_SOURCE.md)，安全报告见 [SECURITY.md](SECURITY.md)。

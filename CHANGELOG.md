@@ -1,11 +1,13 @@
 # Personal maintained edition
 
-## 0.2.0-qinglong.1 (2026-10-25)
+## 0.2.0-qinglong.2 (2026-10-25)
 
 - Integrate DSH tool schema subset compatibility into TypeScript sources.
 - Align the default and maximum local input guard at 2,621,440 characters, with runtime configuration diagnostics.
 - Prefer the latest pending model selection when choosing compaction routes.
 - Preserve a standalone installable package and legacy startup recovery materials, including client metadata.
+- Align repository links and active contribution/release documentation with this maintained edition.
+- The earlier qinglong.1 source tag remains as an initial snapshot; no release assets were published for it.
 - Base: upstream v0.2.0, commit 6a57b2f9c512bacafe678868c08ef47bb7b484fe.
 
 The following entries describe upstream releases.

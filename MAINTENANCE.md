@@ -4,7 +4,7 @@
 
 本仓库独立维护，基于上游 `yuezengwu/dsh-tokenfree` 的 v0.2.0，提交 `6a57b2f9c512bacafe678868c08ef47bb7b484fe`。保留 MIT 许可。`README.upstream.md` 及其他上游设计、测试文档是继承资料，不能当作本维护版重新完成了全部实机验收。
 
-当前源码发行号为 `0.2.0-qinglong.1`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；不要因为出现自己的安装包而自动替换正在工作的环境。
+当前源码发行号为 `0.2.0-qinglong.2`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；不要因为出现自己的安装包而自动替换正在工作的环境。
 
 ## 下载和安装
 
@@ -17,10 +17,10 @@ shasum -a 256 -c SHA256SUMS
 DSH 的插件安装目标是 profile。CLI 可用且目标 profile 没有被桌面占用时，使用其原生安装命令，文件名替换成实际下载路径：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.1.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.2.tgz
 ```
 
-若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-0.2.0-qinglong.1.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
+若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-0.2.0-qinglong.2.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
 
 重启后核对实际安装版本、TokenFree 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。本版完整安装到新的真实桌面环境尚未验证。
 
