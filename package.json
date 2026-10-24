@@ -1,6 +1,6 @@
 {
   "name": "dsh-tokenfree",
-  "version": "0.2.0-qinglong.3",
+  "version": "0.2.0-qinglong.4",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QingLong-C/Plugin-TokenFree.git"
@@ -107,7 +107,8 @@
         "@deepseek-ai/dsh-api-gateway",
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-chat"
       ],
       "platform": "web"
     }
@@ -138,6 +139,7 @@
     "@deepseek-ai/dsh-api-gateway": "0.2.1-rc.3",
     "@deepseek-ai/dsh-api-session-controller": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-conversation": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-ui-chat": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-session": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-settings": "0.2.1-rc.3",
@@ -163,6 +165,7 @@
     "@deepseek-ai/dsh-agent-preset-registry": "0.2.1-rc.3",
     "@deepseek-ai/dsh-api-gateway": "0.2.1-rc.3",
     "@deepseek-ai/dsh-api-session-controller": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-ui-chat": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-conversation": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-session": "0.2.1-rc.3",

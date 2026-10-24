@@ -1,5 +1,12 @@
 # Personal maintained edition
 
+## 0.2.0-qinglong.4 (2026-10-25)
+
+- Show “官网内容过滤” for explicit upstream CONTENT_FILTER responses, and “官网撤回了回答” for withdrawal without a reported reason. Preserve CONTENT_RETRACTED for diagnostics and existing recovery behavior.
+- Replace the affected terminal error heading through DSH's public keyed Chat slot. Recognize persisted older errors without regenerating content; delegate unrelated errors to the live native renderer and release the override on unload.
+- Add readable host/CLI error messages and regression coverage for filtering, unknown withdrawal, original fallback, late renderer registration and unload. Do not retry filtered requests or treat them as successful responses or tools.
+- Keep the existing schema, long-input, model-selection and DSML compatibility fixes. No website protocol or model routing change is included.
+
 ## 0.2.0-qinglong.3 (2026-10-25)
 
 - Decode complete DeepSeek DSML tool batches into the existing JSON/native tool pipeline without an extra formatting request.

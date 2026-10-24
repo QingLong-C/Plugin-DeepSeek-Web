@@ -46,7 +46,11 @@ test('Web SSE decodes snapshots, compressed appends, and relative batches withou
 
 test('disconnect, invalid JSON, failed completion and forbidden patch paths fail closed', async () => {
   await assert.rejects(readWebResponse(sse([snapshot('{"kind":"tool"}', 'WIP')])), /disconnected/)
-  await assert.rejects(readWebResponse(sse([snapshot('filtered', 'CONTENT_FILTER')])), /did not complete/)
+  await assert.rejects(readWebResponse(sse([snapshot('filtered', 'CONTENT_FILTER')])), error => {
+    assert.equal(error.code, 'CONTENT_RETRACTED')
+    assert.match(error.message, /官网内容过滤.*CONTENT_FILTER/)
+    return true
+  })
   await assert.rejects(readWebResponse(new Response('data: bad-json\n\n', { headers: { 'content-type': 'text/event-stream' } })), /Invalid JSON/)
   const state = new WebResponseState()
   assert.throws(() => state.apply({ p: '__proto__/polluted', v: true }), /patch path/)

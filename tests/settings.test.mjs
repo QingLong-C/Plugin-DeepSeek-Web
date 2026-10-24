@@ -78,7 +78,11 @@ test('built DSH client bundle mounts its Remote namespace and contributes a disp
       return async () => { unmounted++ }
     } },
     slots: {
-      inject: (name, callback) => { assert.equal(name, 'settings.section'); handlers.push(callback()) },
+      inject: (name, callback) => {
+        // This settings-only host has no Chat declaration; its pending injection stays inactive.
+        if (name === 'conversation.chat.node') return () => {}
+        assert.equal(name, 'settings.section'); handlers.push(callback()); return () => {}
+      },
       register: (entry, component) => { registered++; assert.equal(entry.id, 'dsh-tokenfree:account'); nativeActions = entry.inject().actions; assert.equal(typeof component, 'function'); return () => {} },
     },
     inject: (services, callback) => { callback(ctx); return { await: async () => {}, dispose: async () => { for (const dispose of handlers) dispose() } } },

@@ -11,6 +11,25 @@ import { LocalDiagnostics } from '../lib/local/diagnostics.js'
 const base = () => ({ provider: PROVIDER, model: MODEL, messages: [{ role: 'user', content: [{ type: 'text', text: 'Read the marker and answer.' }] }] })
 const adapterFor = f => new TokenFreeAdapter({}, { store: f.store, diagnostics: f.log, credential: async () => ({ token: 'fixture-secret-token', accountId: 'fixture-owner' }), client: (_, c) => f.web.client(f.log, c.operationId) })
 
+test('official filtering and unexplained withdrawal have distinct readable errors without tools or format retries', async () => {
+  for (const filtered of [true, false]) {
+    const f = await setup(), adapter = adapterFor(f), chunks = []
+    f.web.completion = ({ ready, text }) => sse(ready + frame(snapshot(text.slice(0, -2), 'WIP')) + (filtered
+      ? frame({ p: 'response', o: 'BATCH', v: [{ p: 'status', v: 'CONTENT_FILTER' }, { p: 'fragments', v: [{ type: 'TEMPLATE_RESPONSE', content: 'Official refusal fixture.' }] }] })
+      : frame({ clear_response: true }, 'hint')))
+    try {
+      await assert.rejects(async () => { for await (const chunk of adapter.stream({ ...base(), tools: [tool] })) chunks.push(chunk) }, error => {
+        assert.equal(error.code, 'CONTENT_RETRACTED')
+        assert.match(error.message, filtered ? /官网内容过滤.*CONTENT_FILTER/ : /官网撤回了回答.*未提供具体原因/)
+        if (!filtered) assert.equal(error.message.includes('CONTENT_FILTER'), false)
+        return true
+      })
+      assert.equal(chunks.some(chunk => chunk.type === 'finish' || chunk.blockType === 'tool-call' || chunk.type === 'tool-call-delta'), false)
+      assert.equal(f.web.generations.length, 1)
+    } finally { adapter.dispose(); await f.close() }
+  }
+})
+
 test('actual DSH LlmRuntime completes DSML tool result exchange through mock official HTTP without format retry', async () => {
   const f = await setup(), ctx = new Context(), adapter = adapterFor(f)
   f.web.answer = (p, _, n) => n === 1 ? `<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="${tool.name}"><｜｜DSML｜｜ parameter name="arguments" string="false">{}</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>`

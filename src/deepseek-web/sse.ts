@@ -71,7 +71,8 @@ export class WebResponseState {
     const snapshot = this.snapshot()
     this.done = snapshot.status === 'FINISHED'
     if (['CONTENT_FILTER', 'CONTEXT_LENGTH_EXCEEDED', 'INCOMPLETE', 'TIMEOUT', 'FAILED'].includes(snapshot.status ?? '')) {
-      throw new LlmError(`Web response did not complete (${snapshot.status}).`, snapshot.status === 'CONTENT_FILTER' ? 'CONTENT_RETRACTED' : snapshot.status === 'CONTEXT_LENGTH_EXCEEDED' ? 'CONTEXT_WINDOW_EXCEEDED' : 'WEB_INCOMPLETE')
+      if (snapshot.status === 'CONTENT_FILTER') throw new LlmError('DeepSeek 官网内容过滤（CONTENT_FILTER）：本次回答已被官网拦截或撤回。', 'CONTENT_RETRACTED')
+      throw new LlmError(`Web response did not complete (${snapshot.status}).`, snapshot.status === 'CONTEXT_LENGTH_EXCEEDED' ? 'CONTEXT_WINDOW_EXCEEDED' : 'WEB_INCOMPLETE')
     }
   }
   snapshot(): WebSnapshot {
@@ -140,7 +141,7 @@ export async function* readWebEvents(response: Response, chatId: string, identit
     buffer += decoder.decode()
     if (buffer.trim()) for (const event of parse(buffer)) yield event
     if (!state.done) throw new LlmError('Web stream disconnected before a verified FINISHED state.', 'WEB_DISCONNECTED')
-    if (state.snapshot().cleared) throw new LlmError('Web response was withdrawn.', 'CONTENT_RETRACTED')
+    if (state.snapshot().cleared) throw new LlmError('DeepSeek 官网撤回了回答：未提供具体原因。', 'CONTENT_RETRACTED')
   } finally {
     signal?.removeEventListener('abort', abort)
     await reader.cancel().catch(() => {}); reader.releaseLock()

@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import tokenfreeRemote from 'dsh-tokenfree/remote'
 import { AccountSettings, type AccountActions } from './AccountSettings.js'
+import { installFailureNotice } from './FailureNotice.js'
 
 export const inject = ['remote', 'slots']
 const provider = 'tokenfree-deepseek-web', model = 'web-default'
@@ -24,6 +25,7 @@ async function unwrap<T>(pending: Promise<RemoteResult<T>>): Promise<T> {
 export async function apply(ctx: Context): Promise<() => Promise<void>> {
   const unmount = await ctx.remote.$mount(tokenfreeRemote)
   const feature = ctx.inject(['remote.tokenfree', 'slots'], scope => {
+    installFailureNotice(scope)
     const sessionId = () => scope.get('uiSession')?.adapter.current.getSnapshot().key
     const actions: AccountActions = {
       sessionId,

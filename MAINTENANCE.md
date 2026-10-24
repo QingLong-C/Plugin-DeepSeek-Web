@@ -4,7 +4,7 @@
 
 本仓库独立维护，基于上游 `yuezengwu/dsh-tokenfree` 的 v0.2.0，提交 `6a57b2f9c512bacafe678868c08ef47bb7b484fe`。保留 MIT 许可。`README.upstream.md` 及其他上游设计、测试文档是继承资料，不能当作本维护版重新完成了全部实机验收。
 
-当前源码发行号为 `0.2.0-qinglong.3`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
+当前源码发行号为 `0.2.0-qinglong.4`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
 
 ## 下载和安装
 
@@ -17,12 +17,12 @@ shasum -a 256 -c SHA256SUMS
 DSH 的插件安装目标是 profile。CLI 可用且目标 profile 没有被桌面占用时，使用其原生安装命令，文件名替换成实际下载路径：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.3.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.4.tgz
 ```
 
-若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-0.2.0-qinglong.3.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
+若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-0.2.0-qinglong.4.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
 
-重启后核对实际安装版本、TokenFree 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。本版完整安装到新的真实桌面环境尚未验证。
+重启后核对实际安装版本、TokenFree 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。此前完整 `qinglong.3` 安装包已在 macOS DSH 0.2.1-rc.3 验证原长对话真实工具往返、双向模型选择和设置卡片；新环境及新修订版的安装仍需分别验收。
 
 ## 从外部补丁入口迁移
 
@@ -45,6 +45,12 @@ DSML 本身没有 request_id；仅绑定到上游已核实身份与完整历史�
 本修复已在 macOS、DSH 0.2.1-rc.3、原 0.2.0 加五文件恢复入口上完成真实验证：合法 DSML 批次进入原生工具，视频下载及成品核对完成，1080p、约 9 分 27 秒、音视频整段解码退出码 0。过程中一次模型生成的参数 JSON 多余右花括号被拒绝；后续成品核对轮正常完成，不能将本结果描述为所有损坏响应均可自动恢复。自有完整 tgz 的发布与旧版补丁部署分别验收。
 
 ## 后续升级
+
+### 官网过滤与撤回提示
+
+`CONTENT_RETRACTED` 保持原错误码。官网 SSE 明确返回 `status: CONTENT_FILTER` 时，主机错误文字与 Chat 标题直接说明“官网内容过滤”；仅有 `clear_response` 等撤回信号时说明“官网撤回了回答，未提供具体原因”。不按题材猜过滤、不增加联网重试、不把拒答写成成功或可执行工具。
+
+客户端通过公开的 `conversation.chat.node` keyed slot 包装 `turn-error`，识别旧历史错误中的明确 `CONTENT_FILTER` 标记。其他错误完整委托给当前原生组件；插件卸载恢复原生呈现。若宿主插槽或原生组件接线已变化则保留其原生界面，主机中文错误仍可读；不修改 DSH 应用资源或历史日志。
 
 保持当前已验收版本，不自动跟随上游。需要升级时：对比提交和依赖；逐项判断 schema、输入限制、模型选择修复是否仍需要；在独立目录适配后运行完整检查。通过普通对话、工具往返、双向模型选择及长对话检查后，再安排真实环境迁移；失败恢复原包与对应入口。
 
