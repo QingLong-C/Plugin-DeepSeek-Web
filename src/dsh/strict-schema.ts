@@ -3,7 +3,7 @@ import { Ajv2019 } from 'ajv/dist/2019.js'
 import { Ajv2020 } from 'ajv/dist/2020.js'
 import type { FormatsPlugin } from 'ajv-formats'
 import { createRequire } from 'node:module'
-import { TokenFreeError, record } from '../core/errors.js'
+import { TokenFreeError, ToolArgumentsError, record } from '../core/errors.js'
 import { strictJson } from '../core/json.js'
 const addFormats = createRequire(import.meta.url)('ajv-formats') as FormatsPlugin
 
@@ -48,7 +48,11 @@ export class StrictSchemas {
     if (!validate(value)) {
       const issue = validate.errors?.[0]
       // Do not include actual argument values, enum lists or schema contents in errors/logs.
-      throw new TokenFreeError(`参数未通过严格格式校验：${issue?.instancePath || '/'}（${issue?.keyword || 'schema'}）；本步骤未执行工具。`, code)
+      const message = `参数未通过严格格式校验：${issue?.instancePath || '/'}（${issue?.keyword || 'schema'}）；本步骤未执行工具。`
+      if (code === 'INVALID_TOOL_CALL') throw new ToolArgumentsError(message, { path: issue?.instancePath ?? '', rule: issue?.keyword ?? 'schema',
+        ...(typeof issue?.params.missingProperty === 'string' ? { missingProperty: issue.params.missingProperty } : {}),
+        ...(typeof issue?.params.additionalProperty === 'string' ? { additionalProperty: issue.params.additionalProperty } : {}) })
+      throw new TokenFreeError(message, code)
     }
   }
 }

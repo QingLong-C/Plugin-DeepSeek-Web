@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
-import { TokenFreeError, record } from './errors.js'
+import { TokenFreeError, ToolArgumentsError, record } from './errors.js'
 import type { Block, ModelInput, NativeAttempt, NativeBoundary, CompactionAnchor, OfficialBudget, WebIdentity, WebMessage, WebSnapshot, WebTransport } from './types.js'
-import { canonical, catalogueHash, decodeResponse, encodeFormatRepair, encodeInput, encodeSummary, FinalDecoder, messageHash, WebResponseFormatError } from './codec.js'
+import { canonical, catalogueHash, decodeResponse, encodeFormatRepair, encodeToolCorrection, encodeInput, encodeSummary, FinalDecoder, messageHash, WebResponseFormatError } from './codec.js'
 import { streamsFinal } from './policy.js'
 import { toolJson } from './json.js'
 import type { UsageStatus } from './account-types.js'
@@ -347,6 +347,7 @@ export class SessionEngine {
       let repairAttempt = 0
       let nextPrompt = prompt
       for (;;) {
+        signal.throwIfAborted()
         decoder = new FinalDecoder(id)
         raw = ''; reasoning = ''; revision = false
         await this.update(operation, { stage: 'sending' })
@@ -373,7 +374,7 @@ export class SessionEngine {
                 const suffix = reasoning.slice(shownReasoning.length); shownReasoning = reasoning; yield { type: 'reasoning', text: suffix }
               }
               const text = visible(decoder.text, input.stop)
-              if (streamsFinal(input.policy) && !revision && text.startsWith(shown) && text.length > shown.length) { const suffix = text.slice(shown.length); shown = text; yield { type: 'text', text: suffix } }
+              if (!repairAttempt && streamsFinal(input.policy) && !revision && text.startsWith(shown) && text.length > shown.length) { const suffix = text.slice(shown.length); shown = text; yield { type: 'text', text: suffix } }
             }
             break
           } catch (error) {
@@ -396,10 +397,33 @@ export class SessionEngine {
         let blocks: Block[]
         try { blocks = validate(raw, id) }
         catch (error) {
+          if (error instanceof ToolArgumentsError && repairAttempt) throw new ToolArgumentsError(`已自动纠正一次，参数仍不合格。${error.message}`, error.issue)
+          if (!summary && error instanceof ToolArgumentsError && !repairAttempt && !shown) {
+            // The whole batch is still undelivered. Diagnose each call without executing it.
+            const candidate = decodeResponse(raw, input.tools)
+            const calls = candidate.filter(block => block.type === 'tool-call')
+            const errors: (ToolArgumentsError['issue'] & { call: number; name: string })[] = []
+            for (const [index, call] of calls.entries()) {
+              try { validate(JSON.stringify({ protocol_version: 1, request_id: id, kind: 'tool', calls: [{ name: call.name, arguments: JSON.parse(call.arguments) }] }), id) }
+              catch (issue) {
+                if (!(issue instanceof ToolArgumentsError)) throw issue
+                errors.push({ ...issue.issue, call: index, name: call.name })
+              }
+            }
+            if (!errors.length) throw error
+            nextPrompt = encodeToolCorrection(input, id, calls, errors, this.dependencies.maxPromptChars)
+            signal.throwIfAborted()
+            await this.update(operation, { stage: 'prepared', expected: candidate,
+              repair: { mode: 'arguments', invalidCalls: errors.map(issue => issue.call), original: operation.identity!, candidateHash: digest(canonical(candidate)), parentId: operation.parentId, promptHash: operation.promptHash, path: operation.verifiedPath! },
+              parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined, finalStatus: undefined, promptHash: digest(nextPrompt) })
+            this.dependencies.log?.write('model.format-repair', { operationId: id, stage: 'tool-arguments', attempt: 1 })
+            repairAttempt++
+            continue
+          }
           if (!(error instanceof WebResponseFormatError) || !error.repairable || repairAttempt || shown) throw error
           const candidate = decodeResponse(raw, input.tools)
           nextPrompt = encodeFormatRepair({ messages: [], tools: input.tools }, raw, this.dependencies.maxPromptChars, id)
-          // Validation must also accept the exact old intent; schema/name failures are never repaired.
+          // Wrapper-only repair must preserve the exact old intent; argument correction is handled above.
           validate(JSON.stringify({ ...strictEnvelope(raw), protocol_version: 1, request_id: id }), id)
           operation.expected = candidate
           await this.update(operation, { repair: { original: operation.identity!, candidateHash: digest(canonical(candidate)), parentId: operation.parentId, promptHash: operation.promptHash, path: operation.verifiedPath! }, parentId: operation.identity!.responseId,
@@ -407,7 +431,15 @@ export class SessionEngine {
           repairAttempt++
           continue
         }
-        if (operation.repair && digest(canonical(blocks.map(x => x.type === 'tool-call' ? { ...x, id: x.id } : x))) !== operation.repair.candidateHash) {
+        if (operation.repair?.mode === 'arguments') {
+          const repair = operation.repair
+          const expected = (operation.expected ?? []).filter(block => block.type === 'tool-call')
+          const actual = blocks.filter(block => block.type === 'tool-call')
+          if (!expected.length || actual.length !== expected.length || actual.some((call, index) => call.name !== expected[index]!.name
+            || !repair.invalidCalls?.includes(index) && canonical(JSON.parse(call.arguments)) !== canonical(JSON.parse(expected[index]!.arguments)))) {
+            throw new TokenFreeError('参数纠正改变了工具名称、顺序、数量或原本合格的调用；本步骤未执行工具。', 'WEB_TOOL_FORMAT')
+          }
+        } else if (operation.repair && digest(canonical(blocks.map(x => x.type === 'tool-call' ? { ...x, id: x.id } : x))) !== operation.repair.candidateHash) {
           // Candidate was decoded with the same request identity for stable IDs below.
           const expected = operation.expected ?? []
           const semantics = (items: Block[]) => items.map(x => x.type === 'tool-call' ? { type: x.type, name: x.name, arguments: x.arguments } : x)
@@ -428,7 +460,7 @@ export class SessionEngine {
     } catch (error) {
       if (operation) {
         this.dependencies.log?.content(operation.id, 'preview', { text: error instanceof TokenFreeError && error.code === 'CONTENT_RETRACTED' ? '' : shown, reasoning: shownReasoning, failed: true })
-        if (error instanceof TokenFreeError && error.details?.accepted === false) {
+        if ((error instanceof TokenFreeError && error.details?.accepted === false) || (operation.repair && operation.stage === 'prepared')) {
           if (operation.repair) await this.update(operation, { stage: 'failed', rebase: true, identity: operation.repair.original,
             parentId: operation.repair.parentId, promptHash: operation.repair.promptHash, verifiedPath: operation.repair.path, finalStatus: 'FINISHED' })
           else await this.update(operation, { stage: 'failed', knownRejected: true })

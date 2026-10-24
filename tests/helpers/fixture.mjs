@@ -37,7 +37,8 @@ export class WebFixture {
       const editing = path.endsWith('/chat/edit_message')
       if (editing) this.edits.push(body); else this.generations.push(body)
       const requestId = this.next++, responseId = this.next++
-      const p = body.prompt.includes('DSH_INPUT_JSON:\n') ? payload(body.prompt) : { request_id: /FORMAT_REPAIR ([^:]+):/.exec(body.prompt)?.[1] }
+      const p = body.prompt.includes('DSH_INPUT_JSON:\n') ? payload(body.prompt) : body.prompt.includes('TOOL_ARGUMENT_CORRECTION_JSON:\n')
+        ? JSON.parse(body.prompt.split('TOOL_ARGUMENT_CORRECTION_JSON:\n')[1]) : { request_id: /FORMAT_REPAIR ([^:]+):/.exec(body.prompt)?.[1] }
       const raw = editing ? this.summary(JSON.parse(body.prompt.split('DSH_COMPACTION_INPUT_JSON:\n')[1]), body) : this.answer(p, body, this.generations.length)
       const text = typeof raw === 'string' ? raw : JSON.stringify(raw)
       const user = { message_id: requestId, parent_id: editing ? this.chats.get(body.chat_session_id).find(x => x.message_id === body.message_id)?.parent_id : body.parent_message_id, role: 'USER', status: 'FINISHED', fragments: [{ type: 'REQUEST', content: body.prompt }] }

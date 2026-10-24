@@ -19,7 +19,7 @@ test('strict original schemas reject the whole batch before any native tool is d
   try {
     await assert.rejects(async () => { for await (const c of adapter.stream({ ...base(), tools: [constrained] })) chunks.push(c) }, e => e.code === 'INVALID_TOOL_CALL')
     assert.equal(chunks.some(c => c.blockType === 'tool-call' || c.block?.type === 'tool-call'), false)
-    assert.equal(f.web.generations.length, 1, 'do not regenerate or invent missing values')
+    assert.equal(f.web.generations.length, 2, 'one bounded correction; still no invalid calls')
   } finally { await adapter.dispose(); await f.close() }
 })
 
@@ -139,7 +139,7 @@ test('malformed JSON, unknown tool, duplicate field or invalid schema never emit
       const chunks = []
       await assert.rejects(async () => { for await (const chunk of adapter.stream({ ...base(), tools: [tool] })) chunks.push(chunk) })
       assert.equal(chunks.some(x => x.blockType === 'tool-call' || x.type === 'tool-call-delta'), false)
-      assert.equal(f.web.generations.length, 1)
+      assert.equal(f.web.generations.length, candidate.includes('"unexpected":true') ? 2 : 1)
     } finally { adapter.dispose(); await f.close() }
   }
 })
@@ -175,7 +175,7 @@ test('recovered punctuation cannot bypass schema validation or expose a partial 
   try {
     await assert.rejects(async () => { for await (const c of adapter.stream({ ...base(), tools: [tool] })) chunks.push(c) }, e => e.code === 'INVALID_TOOL_CALL')
     assert.equal(chunks.some(x => x.blockType === 'tool-call' || x.type === 'tool-call-delta'), false)
-    assert.equal(f.web.generations.length, 1)
+    assert.equal(f.web.generations.length, 2)
   } finally { adapter.dispose(); await f.close() }
 })
 
