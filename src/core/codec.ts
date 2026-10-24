@@ -70,9 +70,69 @@ export function responseShape(text: string): ResponseShape {
 export class WebResponseFormatError extends LlmError {
   constructor(message: string, readonly repairable: boolean) { super(message, 'WEB_TOOL_FORMAT') }
 }
+
+/** Parse one complete DSML batch; never search prose for commands or execute here. */
+function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string): unknown {
+  let cursor = 0
+  const invalid = (): never => { throw new WebResponseFormatError('Invalid or ambiguous DSML tool batch. No tools were executed.', false) }
+  const ws = () => { while (/[ \t\r\n]/.test(text[cursor] ?? '') && cursor < text.length) cursor++ }
+  const take = (pattern: RegExp): RegExpExecArray => {
+    ws()
+    const match = pattern.exec(text.slice(cursor))
+    if (!match) return invalid()
+    cursor += match[0].length
+    return match
+  }
+  const closeParameter = '</｜｜DSML｜｜ parameter>'
+  const calls: { name: string; arguments: Record<string, unknown> }[] = []
+  take(/^<｜｜DSML｜｜ calls>/)
+  for (;;) {
+    ws()
+    if (text.startsWith('</｜｜DSML｜｜ calls>', cursor)) break
+    if (calls.length === 8) return invalid()
+    const name = take(/^<｜｜DSML｜｜ invoke name="([^"<>\r\n]+)">/)[1]!
+    const tool = tools.find(tool => tool.name === name)
+    if (!tool) return invalid()
+    const parameters: Record<string, unknown> = Object.create(null)
+    let count = 0, wrapped = false
+    for (;;) {
+      ws()
+      if (text.startsWith('</｜｜DSML｜｜ invoke>', cursor)) break
+      const parameter = take(/^<｜｜DSML｜｜ parameter name="([^"<>\r\n]+)" string="(true|false)">/)
+      const key = parameter[1]!
+      if (Object.hasOwn(parameters, key)) return invalid()
+      const end = text.indexOf(closeParameter, cursor)
+      if (end < 0) return invalid()
+      const body = text.slice(cursor, end)
+      if (body.includes('<｜｜DSML｜｜') || body.includes('</｜｜DSML｜｜')) return invalid()
+      try { parameters[key] = parameter[2] === 'true' ? body : strictJson(body) }
+      catch { return invalid() }
+      wrapped = key === 'arguments' && parameter[2] === 'false'
+      count++
+      cursor = end + closeParameter.length
+    }
+    take(/^<\/｜｜DSML｜｜ invoke>/)
+    if (!count) return invalid()
+    const schema = tool.parameters
+    const declaresArguments = record(schema) && record(schema.properties) && Object.hasOwn(schema.properties, 'arguments')
+    let args = parameters
+    if (!declaresArguments && Object.hasOwn(parameters, 'arguments')) {
+      if (count !== 1 || !wrapped || !record(parameters.arguments)) return invalid()
+      args = parameters.arguments
+    }
+    calls.push({ name, arguments: args })
+  }
+  take(/^<\/｜｜DSML｜｜ calls>/)
+  ws()
+  if (cursor !== text.length || !calls.length) return invalid()
+  // DSML carries no request id. Its verified response is bound to this operation upstream.
+  return { protocol_version: 1, ...(id ? { request_id: id } : {}), kind: 'tool', calls }
+}
+
 export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: string, validate?: (tool: Tool, value: unknown) => void): Block[] {
   let value: unknown
-  try { value = strictJson(text) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', false) }
+  if (text.trimStart().startsWith('<｜｜DSML｜｜ calls>')) value = dsmlEnvelope(text, tools, id)
+  else try { value = strictJson(text) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', false) }
   if (!record(value)) throw new WebResponseFormatError('Invalid Web response object.', false)
   if (id && ((value.request_id !== undefined && value.request_id !== id) || (value.protocol_version !== undefined && value.protocol_version !== 1))) throw new LlmError('Response protocol identity changed.', 'WEB_IDENTITY')
   const allowed = value.kind === 'tool' ? ['protocol_version', 'request_id', 'kind', 'calls', 'text'] : ['protocol_version', 'request_id', 'kind', 'text']

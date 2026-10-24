@@ -4,7 +4,7 @@
 
 本仓库独立维护，基于上游 `yuezengwu/dsh-tokenfree` 的 v0.2.0，提交 `6a57b2f9c512bacafe678868c08ef47bb7b484fe`。保留 MIT 许可。`README.upstream.md` 及其他上游设计、测试文档是继承资料，不能当作本维护版重新完成了全部实机验收。
 
-当前源码发行号为 `0.2.0-qinglong.2`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；不要因为出现自己的安装包而自动替换正在工作的环境。
+当前源码发行号为 `0.2.0-qinglong.3`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
 
 ## 下载和安装
 
@@ -17,10 +17,10 @@ shasum -a 256 -c SHA256SUMS
 DSH 的插件安装目标是 profile。CLI 可用且目标 profile 没有被桌面占用时，使用其原生安装命令，文件名替换成实际下载路径：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.2.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.3.tgz
 ```
 
-若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-0.2.0-qinglong.2.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
+若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-0.2.0-qinglong.3.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
 
 重启后核对实际安装版本、TokenFree 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。本版完整安装到新的真实桌面环境尚未验证。
 
@@ -28,9 +28,21 @@ dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.2.t
 
 `maintenance/legacy-compat/` 保存旧启动恢复入口，只匹配其 manifest 已知来源。它的 client.js 是指向原插件客户端的相对软链，只有放在 profile 的 `local-plugins/tokenfree-compat/` 后才有意义；不要直接在仓库运行它。
 
-新版源码已经整合三个兼容修复，正常安装不需要旧包装入口。迁移前备份 vendor 包、锁文件、profile patch 和整个外部兼容目录；禁用旧包装条目，并恢复正常 `dsh-tokenfree` bundle 条目，确保只加载一份。不要将旧 payload 覆盖新源码；未知哈希应停止并重新适配。
+新版源码已经整合 schema、输入限制、压缩路由与 DSML 四类兼容修复，正常安装不需要旧包装入口。迁移前备份 vendor 包、锁文件、profile patch 和整个外部兼容目录；禁用旧包装条目，并恢复正常 `dsh-tokenfree` bundle 条目，确保只加载一份。不要将旧 payload 覆盖新源码；未知哈希应停止并重新适配。
 
 前端入口依赖活动 package 的 `dsh.client`、client export 与客户端文件，不能只验证主机插件。若设置页消失但仍能对话，应核对这些元数据与活动入口。
+
+## 工具格式兼容
+
+主协议仍是 JSON envelope。解码器额外支持从响应开头到结尾完整占据正文的 `<｜｜DSML｜｜ calls>` 批次：精确的 invoke 名称、带 `name` 和 `string="true|false"` 的 parameter，以及配对的结束标记。支持参数逐项列出，或用单个非字符串 `arguments` 参数封装完整对象；工具 schema 明确声明 `arguments` 属性时保留该属性，不拆包。
+
+字符串原样保留，非字符串值使用严格 JSON 解析，不强转、不补参、不猜工具别名。禁止混入前后说明、残缺/嵌套标记、重复参数、重复 JSON 键、未知工具及超过八个调用；空参数调用须显式提供 `arguments` 对象。包含 DSML 分隔符的参数文本不在此兼容范围内。JSON final.text 中引用 DSML 仍是普通文字。
+
+DSML 本身没有 request_id；仅绑定到上游已核实身份与完整历史的当前响应。转成统一 envelope 后继续整批参数校验、工具策略、目录版本和原生权限/执行流程，不额外请求模型重写格式，不在解析器执行命令。摘要及结构化最终输出保持各自限制。
+
+回归包含真实形状的预检参数、直接参数、非法批次、宿主参数拒绝及两轮真实 DSH LlmRuntime 的模拟 HTTP 工具结果往返。真实网页与下载验收范围需单独记录，离线测试不代表所有网页变体均受支持。
+
+本修复已在 macOS、DSH 0.2.1-rc.3、原 0.2.0 加五文件恢复入口上完成真实验证：合法 DSML 批次进入原生工具，视频下载及成品核对完成，1080p、约 9 分 27 秒、音视频整段解码退出码 0。过程中一次模型生成的参数 JSON 多余右花括号被拒绝；后续成品核对轮正常完成，不能将本结果描述为所有损坏响应均可自动恢复。自有完整 tgz 的发布与旧版补丁部署分别验收。
 
 ## 后续升级
 

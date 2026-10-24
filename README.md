@@ -2,13 +2,14 @@
 
 让 DSH 使用你自己的 DeepSeek 网页账号进行对话、调用 DSH 工具和处理长对话，无需填写付费 API Key。模型在 DeepSeek 服务器运行，插件不新增代理监听端口。
 
-这是在 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) 上整合兼容修复的独立维护仓库，保留原项目 MIT 许可与贡献者署名。当前版本 **0.2.0-qinglong.2**，基线为上游 **v0.2.0**。
+这是在 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) 上整合兼容修复的独立维护仓库，保留原项目 MIT 许可与贡献者署名。当前版本 **0.2.0-qinglong.3**，基线为上游 **v0.2.0**。
 
 ## 整合了什么
 
 - 兼容 DSH 工具的 JSON Schema，修复工具装配阶段的报错；部分约束不能由兼容层完整表达，工具执行端仍须验证输入。
 - 将默认输入上限与构造器上限统一为 **2,621,440 字符**，避免长对话被旧的本地限制提前拒绝；这不是 token 数或模型窗口保证。
 - 压缩路由优先读取最新模型选择，修复切换模型后仍使用旧请求配置的问题。
+- 兼容完整的 DeepSeek DSML 工具批次，修复部分工具任务的 `WEB_TOOL_FORMAT`；转换后继续执行原有工具名、参数、策略及宿主校验。支持范围见 [维护说明](MAINTENANCE.md#工具格式兼容)。
 - 修复已进入源码，重新构建会保留；旧安装的启动恢复入口和前端元数据保存在 `maintenance/legacy-compat/`，供维护者迁移。
 
 ## 怎么用

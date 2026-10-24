@@ -39,6 +39,15 @@
         "7ddb1711152d4d105568b3b0d3a2f4b0b66fa5d5016e6c6f55c892e2219face9"
       ],
       "allowMissing": true
+    },
+    "lib/core/codec.js": {
+      "payload": "codec.js",
+      "sha256": "879ac363b7911ba0bbdb4f4df5bed310732d9fac6438ef4af712cb71ffb578cc",
+      "acceptedHashes": [
+        "e90d0ad224f2e57f7cb10d247ed346a68ddf0d292bb10d5a1f83f68285958920",
+        "879ac363b7911ba0bbdb4f4df5bed310732d9fac6438ef4af712cb71ffb578cc"
+      ],
+      "allowMissing": false
     }
   }
 }

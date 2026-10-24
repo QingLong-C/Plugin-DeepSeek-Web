@@ -11,9 +11,9 @@ import { LocalDiagnostics } from '../lib/local/diagnostics.js'
 const base = () => ({ provider: PROVIDER, model: MODEL, messages: [{ role: 'user', content: [{ type: 'text', text: 'Read the marker and answer.' }] }] })
 const adapterFor = f => new TokenFreeAdapter({}, { store: f.store, diagnostics: f.log, credential: async () => ({ token: 'fixture-secret-token', accountId: 'fixture-owner' }), client: (_, c) => f.web.client(f.log, c.operationId) })
 
-test('actual DSH LlmRuntime completes two-round tool result exchange through mock official HTTP', async () => {
+test('actual DSH LlmRuntime completes DSML tool result exchange through mock official HTTP without format retry', async () => {
   const f = await setup(), ctx = new Context(), adapter = adapterFor(f)
-  f.web.answer = (p, _, n) => n === 1 ? { protocol_version: 1, request_id: p.request_id, kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
+  f.web.answer = (p, _, n) => n === 1 ? `<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="${tool.name}"><｜｜DSML｜｜ parameter name="arguments" string="false">{}</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>`
     : { protocol_version: 1, request_id: p.request_id, kind: 'final', text: p.messages.at(-1).content[0].text }
   try {
     await ctx.plugin(LlmRuntime); ctx.llm.registerAdapter([PROVIDER], adapter)
@@ -75,7 +75,7 @@ test('independent temporary calls overlap; cancelling one never cancels another'
 })
 
 test('malformed JSON, unknown tool, duplicate field or invalid schema never emits executable blocks', async () => {
-  for (const candidate of ['broken JSON', '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read_marker"></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>', '{"kind":"tool","calls":[{"name":"unregistered","arguments":{}}]}', '{"kind":"final","kind":"tool","calls":[]}', '{"kind":"tool","calls":[{"name":"read_marker","arguments":{"unexpected":true}}]}']) {
+  for (const candidate of ['broken JSON', '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read_marker"></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>', '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read_marker"><｜｜DSML｜｜ parameter name="arguments" string="false">{"unexpected":true}</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>', '{"kind":"tool","calls":[{"name":"unregistered","arguments":{}}]}', '{"kind":"final","kind":"tool","calls":[]}', '{"kind":"tool","calls":[{"name":"read_marker","arguments":{"unexpected":true}}]}']) {
     const f = await setup(), adapter = adapterFor(f); f.web.answer = () => candidate
     try {
       const chunks = []

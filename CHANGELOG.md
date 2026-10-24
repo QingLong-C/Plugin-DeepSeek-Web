@@ -1,5 +1,13 @@
 # Personal maintained edition
 
+## 0.2.0-qinglong.3 (2026-10-25)
+
+- Decode complete DeepSeek DSML tool batches into the existing JSON/native tool pipeline without an extra formatting request.
+- Preserve exact names and typed arguments; reject malformed, ambiguous, duplicate, mixed-prose and oversized batches before dispatch. Keep existing schema, policy, catalogue and host execution checks.
+- Add focused DSML regression cases and exercise DSML tool/result exchange through the actual DSH LlmRuntime with mocked official HTTP.
+- Add codec.js as the fifth hash-checked legacy startup recovery target while retaining the v0.2.0 installation baseline.
+- Validate live DSML dispatch and a completed 1080p video download on the existing macOS DSH 0.2.1-rc.3 installation. One malformed parameter batch was rejected; the subsequent verification turn completed. Full video/audio decode passed. This does not imply arbitrary malformed-response recovery or installation of the full new tgz into Desktop.
+
 ## 0.2.0-qinglong.2 (2026-10-25)
 
 - Integrate DSH tool schema subset compatibility into TypeScript sources.
