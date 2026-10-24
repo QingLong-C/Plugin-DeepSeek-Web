@@ -4,6 +4,7 @@ import { TokenFreeError, record } from './errors.js'
 import type { Block, ModelInput, NativeAttempt, NativeBoundary, CompactionAnchor, OfficialBudget, WebIdentity, WebMessage, WebSnapshot, WebTransport } from './types.js'
 import { canonical, catalogueHash, decodeResponse, encodeFormatRepair, encodeInput, encodeSummary, FinalDecoder, messageHash, WebResponseFormatError } from './codec.js'
 import { streamsFinal } from './policy.js'
+import { toolJson } from './json.js'
 import type { UsageStatus } from './account-types.js'
 import { budgetFor, metricView, pressure } from './metrics.js'
 import { digest, LocalStore } from '../local/store.js'
@@ -449,7 +450,7 @@ export class SessionEngine {
   }
 }
 function strictEnvelope(text: string): Record<string, unknown> {
-  const value: unknown = JSON.parse(text)
+  const value: unknown = toolJson(text)
   if (!record(value)) throw new TokenFreeError('Invalid formatting candidate.', 'WEB_TOOL_FORMAT')
   return value
 }

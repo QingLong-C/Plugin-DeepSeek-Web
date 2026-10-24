@@ -230,7 +230,7 @@ export class TokenFreeAdapter extends LlmAdapter {
         assertSupportedJsonSchema(sanitizeJsonSchema(tool.parameters))
         const issues = validateJsonSchemaValue(tool.parameters, value)
         if (issues.length) throw new TokenFreeError(`Tool ${tool.name} arguments failed schema validation: ${issues[0]}`, 'INVALID_TOOL_CALL')
-        })
+        }, () => log?.write('model.format-repair', { operationId, stage: 'local-syntax', attempt: 1 }))
         if (input.policy) validatePolicyResult(blocks, input.policy, input.stop, (schema, value) => {
           assertSupportedJsonSchema(sanitizeJsonSchema(schema))
           const issues = validateJsonSchemaValue(schema, value)

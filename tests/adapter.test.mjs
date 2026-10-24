@@ -11,6 +11,22 @@ import { LocalDiagnostics } from '../lib/local/diagnostics.js'
 const base = () => ({ provider: PROVIDER, model: MODEL, messages: [{ role: 'user', content: [{ type: 'text', text: 'Read the marker and answer.' }] }] })
 const adapterFor = f => new TokenFreeAdapter({}, { store: f.store, diagnostics: f.log, credential: async () => ({ token: 'fixture-secret-token', accountId: 'fixture-owner' }), client: (_, c) => f.web.client(f.log, c.operationId) })
 
+test('recovered DSML arguments pass the real adapter once, retain policy/schema checks, and log no raw arguments', async () => {
+  const f = await setup(home => new LocalDiagnostics(home, false)), adapter = adapterFor(f)
+  f.web.answer = () => '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read_marker"><｜｜DSML｜｜ parameter name="arguments" string="false">{}}</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>'
+  try {
+    const chunks = await collect(adapter.stream({ ...base(), tools: [tool] }))
+    assert.equal(chunks.filter(x => x.type === 'block-end' && x.block.type === 'tool-call').length, 1)
+    assert.equal(chunks.at(-1).reason.kind, 'tool-calls')
+    assert.equal(f.web.generations.length, 1, 'local syntax repair must not send another generation')
+    await f.log.flush()
+    const rows = (await readFile(f.log.file, 'utf8')).trim().split('\n').map(JSON.parse)
+    const recovered = rows.filter(x => x.event === 'model.format-repair' && x.stage === 'local-syntax')
+    assert.equal(recovered.length, 1)
+    assert.equal(JSON.stringify(recovered).includes('arguments'), false)
+  } finally { adapter.dispose(); await f.close() }
+})
+
 test('official filtering and unexplained withdrawal have distinct readable errors without tools or format retries', async () => {
   for (const filtered of [true, false]) {
     const f = await setup(), adapter = adapterFor(f), chunks = []
@@ -115,6 +131,28 @@ test('only complete existing intent missing protocol wrapper gets one format rep
     assert.equal(f.web.generations[1].parent_message_id, 2)
     assert.equal(chunks.find(x => x.type === 'block-end').block.name, tool.name)
     assert.equal(chunks.at(-1).reason.kind, 'tool-calls')
+  } finally { adapter.dispose(); await f.close() }
+})
+
+test('local syntax normalization composes with the existing single wrapper repair without changing tool intent', async () => {
+  const f = await setup(), adapter = adapterFor(f)
+  f.web.answer = (p, _, n) => n === 1 ? '{"kind":"tool","calls":[{"name":"read_marker","arguments":{}}]}}'
+    : { protocol_version: 1, request_id: p.request_id, kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
+  try {
+    const chunks = await collect(adapter.stream({ ...base(), tools: [tool] }))
+    assert.equal(f.web.generations.length, 2)
+    assert.equal(chunks.filter(x => x.type === 'block-end' && x.block.type === 'tool-call').length, 1)
+    assert.equal(chunks.at(-1).reason.kind, 'tool-calls')
+  } finally { adapter.dispose(); await f.close() }
+})
+
+test('recovered punctuation cannot bypass schema validation or expose a partial tool batch', async () => {
+  const f = await setup(), adapter = adapterFor(f), chunks = []
+  f.web.answer = () => '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read_marker"><｜｜DSML｜｜ parameter name="arguments" string="false">{"unexpected":true}}</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>'
+  try {
+    await assert.rejects(async () => { for await (const c of adapter.stream({ ...base(), tools: [tool] })) chunks.push(c) }, e => e.code === 'INVALID_TOOL_CALL')
+    assert.equal(chunks.some(x => x.blockType === 'tool-call' || x.type === 'tool-call-delta'), false)
+    assert.equal(f.web.generations.length, 1)
   } finally { adapter.dispose(); await f.close() }
 })
 

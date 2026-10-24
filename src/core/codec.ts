@@ -1,4 +1,4 @@
-import { strictJson } from './json.js'
+import { strictJson, toolJson, unfence } from './json.js'
 export { strictJson } from './json.js'
 import { randomUUID } from 'node:crypto'
 import { TokenFreeError as LlmError, record } from './errors.js'
@@ -72,7 +72,7 @@ export class WebResponseFormatError extends LlmError {
 }
 
 /** Parse one complete DSML batch; never search prose for commands or execute here. */
-function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string): unknown {
+function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string, recovered?: () => void): unknown {
   let cursor = 0
   const invalid = (): never => { throw new WebResponseFormatError('Invalid or ambiguous DSML tool batch. No tools were executed.', false) }
   const ws = () => { while (/[ \t\r\n]/.test(text[cursor] ?? '') && cursor < text.length) cursor++ }
@@ -105,7 +105,7 @@ function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string): unknow
       if (end < 0) return invalid()
       const body = text.slice(cursor, end)
       if (body.includes('<｜｜DSML｜｜') || body.includes('</｜｜DSML｜｜')) return invalid()
-      try { parameters[key] = parameter[2] === 'true' ? body : strictJson(body) }
+      try { parameters[key] = parameter[2] === 'true' ? body : toolJson(body, recovered) }
       catch { return invalid() }
       wrapped = key === 'arguments' && parameter[2] === 'false'
       count++
@@ -117,8 +117,14 @@ function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string): unknow
     const declaresArguments = record(schema) && record(schema.properties) && Object.hasOwn(schema.properties, 'arguments')
     let args = parameters
     if (!declaresArguments && Object.hasOwn(parameters, 'arguments')) {
-      if (count !== 1 || !wrapped || !record(parameters.arguments)) return invalid()
-      args = parameters.arguments
+      if (count !== 1) return invalid()
+      let value = parameters.arguments
+      if (typeof value === 'string') {
+        try { value = toolJson(value, recovered) } catch { return invalid() }
+        recovered?.()
+      } else if (!wrapped) return invalid()
+      if (!record(value)) return invalid()
+      args = value
     }
     calls.push({ name, arguments: args })
   }
@@ -129,10 +135,13 @@ function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string): unknow
   return { protocol_version: 1, ...(id ? { request_id: id } : {}), kind: 'tool', calls }
 }
 
-export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: string, validate?: (tool: Tool, value: unknown) => void): Block[] {
+export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: string, validate?: (tool: Tool, value: unknown) => void, recovered?: () => void): Block[] {
   let value: unknown
-  if (text.trimStart().startsWith('<｜｜DSML｜｜ calls>')) value = dsmlEnvelope(text, tools, id)
-  else try { value = strictJson(text) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', false) }
+  const source = unfence(text)
+  let changed = source !== text
+  const note = () => { changed = true }
+  if (source.trimStart().startsWith('<｜｜DSML｜｜ calls>')) value = dsmlEnvelope(source, tools, id, note)
+  else try { value = toolJson(source, note) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', false) }
   if (!record(value)) throw new WebResponseFormatError('Invalid Web response object.', false)
   if (id && ((value.request_id !== undefined && value.request_id !== id) || (value.protocol_version !== undefined && value.protocol_version !== 1))) throw new LlmError('Response protocol identity changed.', 'WEB_IDENTITY')
   const allowed = value.kind === 'tool' ? ['protocol_version', 'request_id', 'kind', 'calls', 'text'] : ['protocol_version', 'request_id', 'kind', 'text']
@@ -143,9 +152,14 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
   else if (value.kind === 'tool' && Array.isArray(value.calls) && value.calls.length > 0 && value.calls.length <= 8) {
     blocks = value.calls.map((call, index) => {
       if (!record(call) || Object.keys(call).some(k => !['name', 'arguments'].includes(k)) || typeof call.name !== 'string'
-        || !catalogue.has(call.name) || !record(call.arguments)) throw new WebResponseFormatError('Unknown tool or invalid complete tool arguments. No tools were executed.', false)
-      validate?.(catalogue.get(call.name)!, call.arguments)
-      return { type: 'tool-call', id: `tokenfree_${id ?? 'standalone'}_${index}`, name: call.name, arguments: JSON.stringify(call.arguments) }
+        || !catalogue.has(call.name)) throw new WebResponseFormatError('Unknown tool or invalid complete tool arguments. No tools were executed.', false)
+      let args = call.arguments
+      if (typeof args === 'string') {
+        try { args = toolJson(args, note); note() } catch { throw new WebResponseFormatError('Invalid encoded tool arguments. No tools were executed.', false) }
+      }
+      if (!record(args)) throw new WebResponseFormatError('Invalid complete tool arguments. No tools were executed.', false)
+      validate?.(catalogue.get(call.name)!, args)
+      return { type: 'tool-call', id: `tokenfree_${id ?? 'standalone'}_${index}`, name: call.name, arguments: JSON.stringify(args) }
     })
     if (value.text !== undefined) {
       if (typeof value.text !== 'string') throw new WebResponseFormatError('Invalid tool explanation.', false)
@@ -153,6 +167,7 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
     }
   } else throw new WebResponseFormatError('Invalid final/tool envelope. No tools were executed.', false)
   if (id && (value.request_id === undefined || value.protocol_version === undefined)) throw new WebResponseFormatError('Missing response protocol wrapper.', true)
+  if (changed) recovered?.()
   return blocks
 }
 export function encodeFormatRepair(options: CodecOptions, rejected: string, maxChars: number, id = randomUUID()): string {

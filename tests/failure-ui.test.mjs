@@ -46,6 +46,7 @@ test('built client replaces only withdrawal rows, preserves native fallback and 
       ['CONTENT_RETRACTED', 'Web response did not complete (CONTENT_FILTER).', '官网内容过滤'],
       ['CONTENT_RETRACTED', 'DeepSeek 官网内容过滤（CONTENT_FILTER）：本次回答已被官网拦截或撤回。', '官网内容过滤'],
       ['CONTENT_RETRACTED', 'Web response was withdrawn.', '官网撤回了回答'],
+      ['WEB_TOOL_FORMAT', 'Invalid or ambiguous DSML tool batch. No tools were executed.', '工具参数格式错误'],
     ]) {
       const ui = render(React.createElement(winner().component, props(code, message)))
       assert.ok(ui.getByText(heading))
@@ -54,7 +55,7 @@ test('built client replaces only withdrawal rows, preserves native fallback and 
       if (heading !== '官网内容过滤') assert.equal(ui.container.textContent.includes('官网内容过滤'), false)
       cleanup()
     }
-    for (const [code, message] of [['AUTH', 'auth error'], ['WEB_TOOL_FORMAT', 'invalid tool batch'], ['TRANSPORT', 'CONTENT_FILTER mentioned by an unrelated error']]) {
+    for (const [code, message] of [['AUTH', 'auth error'], ['TRANSPORT', 'CONTENT_FILTER mentioned by an unrelated error']]) {
       const ui = render(React.createElement(winner().component, props(code, message)))
       assert.equal(ui.container.textContent, `NATIVE:${code}:${message}`)
       cleanup()

@@ -54,3 +54,62 @@ export function strictJson(text: string): unknown {
   if (i !== text.length) throw new Error('Trailing JSON content')
   return result
 }
+
+/** Only a single whole-response fence is transport decoration; never extract from prose. */
+export function unfence(text: string): string {
+  return /^[ \t\r\n]*```(?:json|xml|dsml)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t\r\n]*$/i.exec(text)?.[1] ?? text
+}
+
+/** Recover punctuation only. Keys, scalar tokens and string bytes are never synthesized or changed. */
+export function toolJson(text: string, recovered?: () => void): unknown {
+  try { return strictJson(text) } catch { /* Try one bounded local normalization. */ }
+  if (text.length > 2_621_440) throw new Error('Tool JSON exceeds recovery limit')
+  const source = unfence(text)
+  try {
+    const value = strictJson(source)
+    recovered?.(); return value
+  } catch { /* The candidate still needs punctuation normalization. */ }
+  const stack: string[] = [], removed = new Set<number>()
+  let quoted = false, escape = false, started = false, rootClose = '', extras = 0
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i]!
+    if (quoted) {
+      if (!escape && char === '"') quoted = false
+      if (!escape && char === '\\') escape = true
+      else escape = false
+      continue
+    }
+    if (/\s/.test(char)) continue
+    if (!started) {
+      if (char !== '{' && char !== '[') throw new Error('Not a complete JSON container')
+      started = true; rootClose = char === '{' ? '}' : ']'
+    } else if (!stack.length) {
+      if (char !== rootClose || ++extras > 8) throw new Error('Extra JSON data')
+      removed.add(i)
+      if (removed.size > 32) throw new Error('Too many JSON syntax repairs')
+      continue
+    }
+    if (char === '"') { quoted = true; continue }
+    if (char === '{' || char === '[') {
+      if (stack.length >= 64) throw new Error('JSON nesting exceeded limit')
+      stack.push(char === '{' ? '}' : ']')
+    } else if (char === '}' || char === ']') {
+      if (stack.pop() !== char) throw new Error('Mismatched JSON delimiter')
+    } else if (char === ',') {
+      let next = i + 1
+      while (next < source.length && /\s/.test(source[next]!)) next++
+      if (source[next] === '}' || source[next] === ']') removed.add(i)
+    }
+    if (removed.size > 32) throw new Error('Too many JSON syntax repairs')
+  }
+  if (!started || quoted || stack.length > 8) throw new Error('Incomplete JSON value')
+  const pieces: string[] = []
+  let cursor = 0
+  for (const index of removed) { pieces.push(source.slice(cursor, index)); cursor = index + 1 }
+  pieces.push(source.slice(cursor), ...stack.reverse())
+  const candidate = pieces.join('')
+  if (candidate === text) throw new Error('No supported JSON syntax repair')
+  const value = strictJson(candidate) // duplicate keys, missing values and invalid tokens still reject the whole batch
+  recovered?.()
+  return value
+}

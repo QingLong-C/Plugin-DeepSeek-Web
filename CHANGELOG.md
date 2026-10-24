@@ -1,5 +1,13 @@
 # Personal maintained edition
 
+## 0.2.0-qinglong.5 (2026-10-25)
+
+- Recover bounded JSON punctuation defects in complete DSML parameters and JSON response envelopes: redundant root closers, trailing commas, missing closing delimiters after complete values, and whole-response fences. Decode one encoded arguments object where the schema does not declare a literal arguments property.
+- Preserve scalar tokens and command string bytes; retain duplicate-key detection, tool catalogue, schema, identity, policy and host approval checks. Validate the complete batch before exposing executable blocks. No additional model generation is used for local syntax recovery.
+- Record a content-free local-syntax repair event. Show readable “工具参数格式错误” for unrecoverable cases, retaining WEB_TOOL_FORMAT and explaining that the failed step was not executed and earlier actions remain.
+- Add recovery/rejection cases, generated nested-value regression coverage and real adapter checks, including composition with the existing bounded wrapper repair. Freeze the retired legacy wrapper payload instead of applying new code to its old installation baseline.
+- Preserve the existing schema, input, compaction/model-routing, DSML and content-filter-display fixes. This improves known format families, not arbitrary missing values or future website protocols.
+
 ## 0.2.0-qinglong.4 (2026-10-25)
 
 - Show “官网内容过滤” for explicit upstream CONTENT_FILTER responses, and “官网撤回了回答” for withdrawal without a reported reason. Preserve CONTENT_RETRACTED for diagnostics and existing recovery behavior.

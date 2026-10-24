@@ -1,6 +1,6 @@
 {
   "name": "dsh-tokenfree",
-  "version": "0.2.0-qinglong.4",
+  "version": "0.2.0-qinglong.5",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QingLong-C/Plugin-TokenFree.git"
@@ -84,6 +84,7 @@
     "TOOL_CALLING_SPEC.md",
     "WEB_API_REFERENCE.md",
     "src/core/codec.ts",
+    "src/core/json.ts",
     "src/deepseek-web/sse.ts",
     "src/dsh/adapter.ts",
     "src/local/diagnostics.ts",
