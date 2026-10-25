@@ -15,6 +15,7 @@ import { DeepSeekWebClient } from '../deepseek-web/client.js'
 import { decodeResponse, modelInput, messageHash } from '../core/codec.js'
 import { allowedTools, defaultPolicy, parsePolicy, validatePolicyResult } from '../core/policy.js'
 import { SessionEngine } from '../core/session.js'
+import { webUsageReport } from '../core/usage-report.js'
 import { TokenFreeError, ToolArgumentsError } from '../core/errors.js'
 import type { NativeBoundary, NativeAttempt, CompactionAnchor, WebTransport, Block, Tool, SessionPolicy } from '../core/types.js'
 import { digest, LocalStore } from '../local/store.js'
@@ -149,6 +150,10 @@ export class TokenFreeAdapter extends LlmAdapter {
     return this.operationStatus(sessionId)
   }
   async usage(sessionId: string) { return (await this.engine()).usage(sessionId) }
+  async usageReport() {
+    const engine = await this.engine()
+    return webUsageReport(this.store, id => engine.key(id))
+  }
   async refreshMetrics(sessionId: string, thinking: boolean, signal: AbortSignal, messages?: readonly unknown[]) {
     const accountSignal = this.dependencies.signal?.()
     signal = AbortSignal.any([signal, this.lifetime.signal, ...(accountSignal ? [accountSignal] : [])])

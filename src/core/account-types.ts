@@ -8,6 +8,12 @@ export interface AccountStatus {
   lastValidatedAt?: number
 }
 
+/** Official branch observations, deliberately separate from API billing counters. */
+export interface WebUsageReport {
+  rows: { sessionId: string; state: 'confirmed' | 'stale' | 'unknown'; count?: number; previousCount?: number; observedAt?: string; pending: boolean }[]
+  unreadableSessions: number
+}
+
 /** Native default selection only. No account or credential fields. */
 export interface DefaultModelStatus {
   available: boolean

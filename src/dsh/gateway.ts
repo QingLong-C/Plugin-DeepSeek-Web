@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { PROVIDER, MODEL } from './adapter.js'
 import { bindRuntime } from './binding.js'
 import { TokenFreeCompactionEngine } from './compaction.js'
-import type { AccountStatus, DefaultModelStatus, OperationStatus, UsageStatus } from '../core/account-types.js'
+import type { AccountStatus, DefaultModelStatus, OperationStatus, UsageStatus, WebUsageReport } from '../core/account-types.js'
 import type { SessionPolicy, PolicyState } from './policy-types.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -75,6 +75,14 @@ export class TokenFreeGateway extends TypertRemoteService {
     if (!compactionId || compactionId.length > 512) throw new RemoteError('gateway/internal', 'Invalid compaction identity.', {})
     try { return await this.adapter?.cancelSummary(sessionId, operationId, compactionId) ?? { pending: false } }
     catch { throw new RemoteError('gateway/internal', '摘要状态已变化，请刷新后重试。', {}) }
+  }
+
+  @Remote
+  async usageReport(): Promise<WebUsageReport> {
+    this.owner()
+    if (!this.adapter) throw new RemoteError('gateway/internal', 'TokenFree runtime is unavailable.', {})
+    try { return await this.adapter.usageReport() }
+    catch { throw new RemoteError('gateway/internal', 'Unable to read local Web usage observations.', {}) }
   }
 
   @Remote

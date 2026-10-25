@@ -2,7 +2,7 @@
 
 让 DSH 使用你自己的 DeepSeek 网页账号完成对话、工具任务和长对话处理，无需配置 API Key。模型在 DeepSeek 服务器运行，工具由 DSH 在本机按原有权限执行。
 
-当前版本：**v1.2.1** · [下载安装包](https://github.com/QingLong-C/Plugin-TokenFree/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.3.0** · [下载安装包](https://github.com/QingLong-C/Plugin-TokenFree/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 本仓库基于 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) v0.2.0 独立维护，整合兼容性与可靠性修复，保留 MIT 许可及原作者署名。
 
@@ -21,6 +21,8 @@
 2. 打开「设置 → TokenFree」，在插件专用 Chrome 窗口登录自己的 DeepSeek 账号。
 3. 点击「使用」，或选择 **TokenFree · DeepSeek Web**；点击「使用」也会设为当前 profile 的默认模型。
 4. 在 DSH 中正常对话和调用工具。当前任务仍运行时，符合恢复条件的官网限流会自动等待后继续，无需手动发送“继续”。
+
+安装 `dsh-local-usage` 后，打开侧栏「用量统计」可看到 **TokenFree 网页用量**：按会话显示官网分支累计 token、观测时间和状态。只读取本机记录，不新增官网请求；不汇总成历史消耗，不计入 API 金额或缓存命中率。
 
 ## 注意事项
 
@@ -52,7 +54,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.2.1.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.3.0.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。
