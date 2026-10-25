@@ -51,7 +51,7 @@ function responseContract(input: ModelInput, id: string) {
         properties: { name: { enum: input.tools.map(tool => tool.name) }, arguments: { type: 'object' } } } } } }
   const shapes = [...(choice === 'required' || choice === 'named' ? [] : [final]), ...(choice !== 'none' && input.tools.length ? [tools] : [])]
   return { enforcement: 'local-validation', tool_catalogue_version: catalogueHash(input.tools), envelope_schema: { oneOf: shapes },
-    arguments_rule: 'Each calls[].arguments must satisfy the complete original parameters schema for that exact name in the current tool catalogue. No type coercion, defaults or invented values. Optional fields remain optional. Required fields must be present.' }
+    arguments_rule: 'Each call has ONLY name and arguments. Put EVERY tool parameter INSIDE calls[].arguments, never beside name/arguments. Each calls[].arguments must satisfy the complete original parameters schema for that exact name in the current tool catalogue. No type coercion, defaults or invented values. Optional fields remain optional. Required fields must be present.' }
 }
 export function encodeInput(input: ModelInput, id: string, start: number, previousTools: Tool[], instructionsChanged: boolean, maxChars: number, bootstrap = start === 0, catalogueKnown = true): string {
   const before = new Map(previousTools.map(tool => [tool.name, canonical(tool)]))
@@ -154,7 +154,7 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
   let changed = source !== text
   const note = () => { changed = true }
   if (source.trimStart().startsWith('<｜｜DSML｜｜ calls>')) value = dsmlEnvelope(source, tools, id, note)
-  else try { value = toolJson(source, note) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', 'syntax') }
+  else try { value = toolJson(source, note, true) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', 'syntax') }
   if (!record(value)) throw new WebResponseFormatError('Invalid Web response object.', 'envelope')
   if (id && ((value.request_id !== undefined && value.request_id !== id) || (value.protocol_version !== undefined && value.protocol_version !== 1))) throw new LlmError('Response protocol identity changed.', 'WEB_IDENTITY')
   const allowed = value.kind === 'tool' ? ['protocol_version', 'request_id', 'kind', 'calls', 'text'] : ['protocol_version', 'request_id', 'kind', 'text']
@@ -164,14 +164,29 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
   if (value.kind === 'final' && typeof value.text === 'string' && value.text.trim()) blocks = [{ type: 'text', text: value.text }]
   else if (value.kind === 'tool' && Array.isArray(value.calls) && value.calls.length > 0 && value.calls.length <= 8) {
     blocks = value.calls.map((call, index) => {
-      if (!record(call) || Object.keys(call).some(k => !['name', 'arguments'].includes(k)) || typeof call.name !== 'string'
+      if (!record(call) || typeof call.name !== 'string'
         || !catalogue.has(call.name)) throw new WebResponseFormatError('Unknown tool or invalid complete tool arguments. No tools were executed.', 'tool', 'tool')
+      const tool = catalogue.get(call.name)!
+      const misplaced = Object.keys(call).filter(k => !['name', 'arguments'].includes(k))
       let args = call.arguments
       if (typeof args === 'string') {
         try { args = toolJson(args, note); note() } catch { throw new WebResponseFormatError('Invalid encoded tool arguments. No tools were executed.', 'tool', 'tool') }
       }
+      if (misplaced.length) {
+        // The declared tool schema gives exactly one destination. Never guess aliases,
+        // drop unknown fields, resolve collisions, coerce values or edit command text.
+        const properties = record(tool.parameters) && record(tool.parameters.properties) ? tool.parameters.properties : undefined
+        if (!properties || misplaced.some(key => !Object.hasOwn(properties, key))
+          || Object.hasOwn(call, 'arguments') && !record(args)) throw new WebResponseFormatError(`Invalid fields at calls[${index}]; put declared parameters inside arguments. No tools were executed.`, 'tool', 'tool')
+        const normalized: Record<string, unknown> = Object.assign(Object.create(null), args)
+        for (const key of misplaced) {
+          if (Object.hasOwn(normalized, key)) throw new WebResponseFormatError(`Conflicting parameter locations at calls[${index}]. No tools were executed.`, 'tool', 'tool')
+          normalized[key] = call[key]
+        }
+        args = normalized; note()
+      }
       if (!record(args)) throw new WebResponseFormatError('Invalid complete tool arguments. No tools were executed.', 'tool', 'tool')
-      validate?.(catalogue.get(call.name)!, args)
+      validate?.(tool, args)
       return { type: 'tool-call', id: `tokenfree_${id ?? 'standalone'}_${index}`, name: call.name, arguments: JSON.stringify(args) }
     })
     if (value.text !== undefined) {
@@ -203,7 +218,7 @@ export function encodeToolCorrection(input: ModelInput, id: string, calls: Extra
 }
 
 /** Replan one undelivered tool step from authoritative input, never extract a command from broken text. */
-export function encodeProtocolCorrection(input: ModelInput, id: string, maxChars: number, expectedKind: 'tool' | 'final' | 'auto' = 'tool', failure?: { stage: string; code: string }): string {
+export function encodeProtocolCorrection(input: ModelInput, id: string, maxChars: number, expectedKind: 'tool' | 'final' | 'auto' = 'tool', failure?: { stage: string; code: string; reason?: string }): string {
   const context = encodeInput(input, id, 0, [], true, maxChars)
   const correction = { protocol_version: 1, request_id: id, attempt: 1, expected_kind: expectedKind, failure,
     instruction: 'The entire previous assistant response is malformed and was NOT delivered to DSH. Discard its tool calls, claimed results and simulated conversation. Only the DSH_INPUT_JSON above contains authoritative task context and real previous tool results. Continue the pending inspection/action from that context. Do not repeat earlier delivered calls, downloads or other completed work. Do not invent missing facts. Return ONE JSON envelope of expected_kind, obeying the response policy and output schema. If expected_kind is auto, choose tool or final from the authoritative pending task; do not call unnecessary tools. For tools, return only calls with valid arguments and no narration or claimed result. For final, use final.text and never claim an action ran unless a real DSH result proves it. If you cannot safely determine the pending action, explain the blocker instead; no tool will execute.' }

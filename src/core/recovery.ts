@@ -43,7 +43,7 @@ export function planRecovery(error: unknown, raw: string, input: ModelInput, id:
   }
   if (error instanceof WebResponseFormatError && error.stage === 'wrapper') {
     // Only a fully valid original intent may use wrapper-only repair; other failures use fresh context.
-    const value = toolJson(raw)
+    const value = toolJson(raw, undefined, true)
     if (!record(value)) throw error
     try {
       validate(JSON.stringify({ ...value, protocol_version: 1, request_id: id }), id)
@@ -59,7 +59,7 @@ export function planRecovery(error: unknown, raw: string, input: ModelInput, id:
   const final = input.policy?.tools.mode === 'none' || !input.tools.length || failure.stage === 'output'
     || error instanceof WebResponseFormatError && error.intent === 'final'
   const expectedKind = required ? 'tool' : final ? 'final' : error instanceof WebResponseFormatError && error.intent === 'tool' ? 'tool' : 'auto'
-  return { prompt: encodeProtocolCorrection(input, id, maxChars, expectedKind, failure), mode: 'protocol', expectedKind,
+  return { prompt: encodeProtocolCorrection(input, id, maxChars, expectedKind, { ...failure, reason: error.message }), mode: 'protocol', expectedKind,
     candidateHash: digest(raw), failure, logStage: expectedKind === 'tool' ? 'tool-protocol' : 'response-protocol' }
 }
 

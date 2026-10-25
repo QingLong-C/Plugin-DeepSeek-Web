@@ -61,7 +61,7 @@ export function unfence(text: string): string {
 }
 
 /** Recover punctuation only. Keys, scalar tokens and string bytes are never synthesized or changed. */
-export function toolJson(text: string, recovered?: () => void): unknown {
+export function toolJson(text: string, recovered?: () => void, envelopeFraming = false): unknown {
   try { return strictJson(text) } catch { /* Try one bounded local normalization. */ }
   if (text.length > 2_621_440) throw new Error('Tool JSON exceeds recovery limit')
   const source = unfence(text)
@@ -70,7 +70,7 @@ export function toolJson(text: string, recovered?: () => void): unknown {
     recovered?.(); return value
   } catch { /* The candidate still needs punctuation normalization. */ }
   const stack: string[] = [], removed = new Set<number>()
-  let quoted = false, escape = false, started = false, rootClose = '', extras = 0
+  let quoted = false, escape = false, started = false, rootClose = '', extras = 0, framing = 0
   for (let i = 0; i < source.length; i++) {
     const char = source[i]!
     if (quoted) {
@@ -80,6 +80,12 @@ export function toolJson(text: string, recovered?: () => void): unknown {
       continue
     }
     if (/\s/.test(char)) continue
+    // Envelope-only transport punctuation outside a single root. Never search prose,
+    // strip XML tags, modify a JSON value, or apply this rule to argument strings.
+    if (envelopeFraming && (!started || !stack.length) && '<>()'.includes(char)) {
+      if (++framing > 8 || removed.size >= 32) throw new Error('Too much envelope framing')
+      removed.add(i); continue
+    }
     if (!started) {
       if (char !== '{' && char !== '[') throw new Error('Not a complete JSON container')
       started = true; rootClose = char === '{' ? '}' : ']'

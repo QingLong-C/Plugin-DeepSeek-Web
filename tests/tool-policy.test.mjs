@@ -31,6 +31,20 @@ async function harness(){
  return{...f,ctx,adapter,get bridge(){return bridge},native,create,ask,unload:()=>layer.dispose(),reload:load,close:async()=>{await adapter.dispose();await ctx.fiber.dispose();await f.close()}}
 }
 
+test('native execution occurs once after recovering a malformed correction response', {timeout:15000},async()=>{
+ const f=await harness();let executions=0
+ const remove=f.ctx.tools.register(defineTool({name:tool.name,description:'Inspect existing marker',parameters:{label:{type:'string'}},output:{schema:{type:'string'},render:(_,v)=>[{type:'text',text:v}]},execute:async(_,args)=>{executions++;return 'Existing artifact inspected'}}))
+ try{
+  const a=await f.create('structural-native')
+  f.web.answer=(p,_,n)=>p.messages.some(m=>m.role==='tool')?{protocol_version:1,request_id:p.request_id,kind:'final',text:'Inspection finished'}:n===1?'unrecognised damaged envelope':'<'+JSON.stringify({protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:tool.name,arguments:{},label:'existing'}]})
+  await f.ask(a,'Only inspect the existing artifact')
+  const events=a.session.snapshotEvents()
+  assert.equal(executions,1);assert.equal(events.filter(e=>e.type==='tool/call').length,1);assert.equal(events.filter(e=>e.type==='tool/result').length,1)
+  assert.equal(events.findLast(e=>e.type==='turn/end').data.reason.kind,'completed');assert.equal(f.web.generations.length,3)
+  assert.equal((await f.adapter.inspect(a.id)).pending,undefined)
+ }finally{remove();await f.close()}
+})
+
 test('actual native task waits through two official rejections after an executed inspection, without repeating the tool', {timeout:15000},async()=>{
  const f=await harness();let executions=0,limits=0
  const remove=f.ctx.tools.register({...definition(),execute:async()=>{executions++;return 'Artifact already exists and inspection passed'}})

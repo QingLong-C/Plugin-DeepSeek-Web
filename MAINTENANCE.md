@@ -4,7 +4,7 @@
 
 本仓库独立维护，基于上游 `yuezengwu/dsh-tokenfree` 的 v0.2.0，提交 `6a57b2f9c512bacafe678868c08ef47bb7b484fe`。保留 MIT 许可。`README.upstream.md` 及其他上游设计、测试文档是继承资料，不能当作本维护版重新完成了全部实机验收。
 
-当前源码发行号为 `1.0.0`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
+当前源码发行号为 `1.0.1`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
 
 当前维护策略是保持目标环境已验收的发行包。后续排障先核对实际安装，不因单次报错、上游发版或官网模型改名自动升级。源码新增修复不等于目标环境已迁移；安装包使用对应 Release 的 SHA256SUMS 核对，纯维护文档提交不替换包、标签或 Release 资产。
 
@@ -19,10 +19,10 @@ shasum -a 256 -c SHA256SUMS
 DSH 的插件安装目标是 profile。CLI 可用且目标 profile 没有被桌面占用时，使用其原生安装命令，文件名替换成实际下载路径：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.0.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.1.tgz
 ```
 
-若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-1.0.0.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
+若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-1.0.1.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
 
 重启后核对实际安装版本、TokenFree 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。此前完整 `qinglong.3` 安装包已在 macOS DSH 0.2.1-rc.3 验证原长对话真实工具往返、双向模型选择和设置卡片；新环境及新修订版的安装仍需分别验收。
 
@@ -37,6 +37,14 @@ dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.0.tgz
 ## 工具格式兼容
 
 ### 本地格式恢复与验收边界
+
+从 v1.0.1 起，每个候选（首次及模型纠正结果）都走相同的本地归一、原始 schema、策略/身份、目录和原生提交门。单个完整 JSON 根外的 `< > ( )` 格式符号最多去除 8 个，并计入每容器 32 个删除位置上限；只作用于响应外壳，不解析说明文字、XML 标签或第二个根，也不改字符串。原有围栏、逗号和括号恢复继续保留。
+
+若工具调用层出现该工具原始 `parameters.properties` 明确声明的参数，可无损搬入该调用的 `arguments`；支持部分字段错层、所有已提供字段错层及单层编码的 arguments。仅有工具名时不凭空创建参数。未知字段、重复位置（值相同也拒绝）、非对象参数和无法唯一归属的结构交给统一恢复，不删除字段、猜别名、填默认值或强转。归一后仍须完整校验整个批次，不能先执行合格的前半段。
+
+本地恢复不联网、不消耗模型纠正额度；纠正响应仍可本地归一。无法确定的损坏继续由现有一次模型纠正处理，提示包含失败阶段、原因及参数层级约束；二次仍不合格则明确失败、零派发。网页文本输出没有服务端 strict 解码保证，有限变异测试不能证明“所有格式已穷举”或任意缺失信息都可自动补齐。
+
+v1.0.1 的新增验证包含 3,840 组跨 64 个工具声明的字段分布/组合损坏，已捕获的两份完整失败响应离线重放并通过原始 schema，及实际 DSH AgentLoop 搭配受控响应的单次工具执行。原任务命令不在格式重放中执行；官网真实流量和受控 HTTP/SSE 验收分别记录。
 
 `qinglong.5` 在已核实完整官网响应后，只修复可确定的格式符号：同类多余根结束括号、对象/数组末尾逗号、完整值后的缺失结束括号，以及整段 JSON/DSML 代码围栏。一个参数对象被 JSON 字符串编码时可解包一次；schema 明确声明的字符串属性不解包。字符串里的括号、逗号、换行、转义和命令文本不修改。
 
