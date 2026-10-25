@@ -2,14 +2,14 @@
 
 让 DSH 使用你自己的 DeepSeek 网页账号完成对话、工具任务和长对话处理，无需配置 API Key。模型在 DeepSeek 服务器运行，工具由 DSH 在本机按原有权限执行。
 
-当前版本：**v1.0.1** · [下载安装包](https://github.com/QingLong-C/Plugin-TokenFree/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.0.2** · [下载安装包](https://github.com/QingLong-C/Plugin-TokenFree/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 本仓库基于 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) v0.2.0 独立维护，整合兼容性与可靠性修复，保留 MIT 许可及原作者署名。
 
 ## 项目用途
 
 - 将 DeepSeek 网页对话接入 DSH，支持原生工具审批、执行结果和会话历史。
-- 提供工具协议解析、原始参数规则校验及交付前的一次自动格式纠正。
+- 提供工具协议解析、原始参数规则校验及交付前按错误类型自动格式纠正。
 - 同账号请求排队；明确限流且确认没有被接受时，等待冷却并继续当前请求。
 - 根据官网分支用量处理长对话压缩，保留模型路由与设置入口兼容修复。
 
@@ -30,7 +30,7 @@
 | 防止重复 | 仅重试明确未接受且无输出的当前生成；需要时核对新鲜完整历史及原父分支，保留已完成工具结果 |
 | 无法自动恢复 | 部分输出、接受状态不明、父分支变化、登录失效和官网过滤需分别处理，不盲目重发 |
 | 任务生命周期 | 用户取消、退出账号或关闭宿主会终止等待；重新打开只保留冷却，不自动唤醒已结束任务 |
-| 格式纠正 | 本地 strict 是提示约束与返回后校验，格式和参数纠正共用一次有效新生成额度，不保证模型永不出错 |
+| 格式纠正 | 本地 strict 是提示约束与返回后校验，先本地恢复；通常一次模型纠正，仅协议收敛为明确参数错误时再定点纠正一次，不保证模型永不出错 |
 | 模型和用量 | 固定插件不固定官网默认模型；用量是当前网页分支计数，不是账号余额；压缩摘要可能遗漏细节 |
 
 保持已验证版本，按实际协议或兼容性变化决定升级；升级前备份 profile、vendor 包、账号数据及其他插件补丁。详细恢复边界和排障见 [维护指南](MAINTENANCE.md)。
@@ -49,7 +49,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.1.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.2.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。

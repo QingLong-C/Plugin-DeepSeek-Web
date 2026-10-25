@@ -206,13 +206,13 @@ export function encodeFormatRepair(options: CodecOptions, rejected: string, maxC
   return prompt
 }
 
-export function encodeToolCorrection(input: ModelInput, id: string, calls: Extract<Block, { type: 'tool-call' }>[], errors: (ToolArgumentsError['issue'] & { call: number; name: string })[], maxChars: number): string {
+export function encodeToolCorrection(input: ModelInput, id: string, calls: Extract<Block, { type: 'tool-call' }>[], errors: (ToolArgumentsError['issue'] & { call: number; name: string })[], maxChars: number, attempt: 1 | 2 = 1): string {
   const names = new Set(errors.map(error => error.name))
-  const body = { protocol_version: 1, request_id: id, attempt: 1,
+  const body = { protocol_version: 1, request_id: id, attempt,
     calls: calls.map(call => ({ name: call.name })), errors,
     tools: input.tools.filter(tool => names.has(tool.name)),
     response_policy: input.policy ? { tools: input.policy.tools, output: input.policy.output } : { tools: { mode: 'auto' }, output: { type: 'text' } }, response_contract: responseContract(input, id) }
-  const prompt = `${protocol}\nThe previous assistant tool batch was NOT executed. This is the only automatic correction attempt. Correct the identified argument schema errors using the original task and declared tools. Preserve tool names, order and count, and preserve every already-valid call exactly. Do not invent missing user facts or claim a tool result. Return the entire corrected batch with this request_id and protocol_version. If correction needs unavailable facts, explain the blocker instead of guessing; no tool will execute.\nTOOL_ARGUMENT_CORRECTION_JSON:\n${JSON.stringify(body)}`
+  const prompt = `${protocol}\nThe previous assistant tool batch was NOT executed. This is the final targeted argument correction attempt (${attempt}). Correct the identified argument schema errors using the original task and declared tools. Preserve tool names, order and count, and preserve every already-valid call exactly. Do not invent missing user facts or claim a tool result. Return the entire corrected batch with this request_id and protocol_version. If correction needs unavailable facts, explain the blocker instead of guessing; no tool will execute.\nTOOL_ARGUMENT_CORRECTION_JSON:\n${JSON.stringify(body)}`
   if (prompt.length > maxChars) throw new LlmError('Tool correction input exceeds the local character limit; no correction was sent.', 'INPUT_TOO_LARGE')
   return prompt
 }

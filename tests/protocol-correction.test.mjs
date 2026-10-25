@@ -29,12 +29,12 @@ test('broken whole tool protocol regenerates once from authoritative DSH context
  }finally{await a.dispose();await f.close()}
 })
 
-test('protocol retry shares one budget with wrapper and argument repair and never delivers an invalid second response',async()=>{
- for(const second of [broken,p=>({kind:'tool',calls:answer(p).calls}),p=>({...answer(p),calls:[{name:tool.name,arguments:{extra:true}}]})]){
+test('protocol retry stops without progress and bounds final schema refinement without invalid delivery',async()=>{
+ for(const [index,second] of [broken,p=>({kind:'tool',calls:answer(p).calls}),p=>({...answer(p),calls:[{name:tool.name,arguments:{extra:true}}]})].entries()){
   const f=await setup(),a=adapterFor(f),chunks=[]
   f.web.answer=(p,_,n)=>n===1?broken:typeof second==='function'?second(p):second
   try{await assert.rejects(async()=>{for await(const c of a.stream(opts()))chunks.push(c)})
-   assert.equal(f.web.generations.length,2);assert.equal(chunks.some(c=>c.blockType==='tool-call'||c.type==='text'),false)
+   assert.equal(f.web.generations.length,index===2?3:2);assert.equal(chunks.some(c=>c.blockType==='tool-call'||c.type==='text'),false)
   }finally{await a.dispose();await f.close()}
  }
 })

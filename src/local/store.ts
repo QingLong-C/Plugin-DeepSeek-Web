@@ -44,7 +44,7 @@ export interface ActiveOperation {
   finalStatus?: string
   stopRequested?: boolean
   rebase?: boolean
-  repair?: { expectedKind?: 'tool' | 'final' | 'auto'; failure?: { stage: string; code: string }; mode?: 'arguments' | 'protocol'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; path: { id: number; parentId: number | null; hash: string }[] }
+  repair?: { attempt?: 1 | 2; expectedKind?: 'tool' | 'final' | 'auto'; failure?: { stage: string; code: string }; mode?: 'arguments' | 'protocol'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; path: { id: number; parentId: number | null; hash: string }[] }
   verifiedPath?: { id: number; parentId: number | null; hash: string }[]
   rateRejected?: boolean
   knownRejected?: boolean
@@ -99,6 +99,7 @@ const policy = (v: unknown) => {
   try { const { revision: _, ...settings } = v; parsePolicy(settings); return true } catch { return false }
 }
 const repair = (v: unknown, chatId: unknown): boolean => v === undefined || (record(v)
+  && (v.attempt === undefined || v.attempt === 1 || v.attempt === 2 && v.mode === 'arguments')
   && (v.mode === undefined || v.mode === 'arguments' || v.mode === 'protocol')
   && (v.expectedKind === undefined || ['tool', 'final', 'auto'].includes(String(v.expectedKind)))
   && record(v.original) && v.original.chatId === chatId && integer(v.original.requestId) && integer(v.original.responseId)

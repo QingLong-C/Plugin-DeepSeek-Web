@@ -490,19 +490,19 @@ export class SessionEngine {
         try { blocks = validate(raw, id) }
         catch (error) {
           const plan = planRecovery(error, raw, input, id, this.dependencies.maxPromptChars, validate, {
-            summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair),
+            summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair), previous: operation.repair,
             confirmed: operation.finalStatus === 'FINISHED' && Boolean(operation.identity && operation.verifiedPath),
           })
           if (!plan) throw error
           signal.throwIfAborted()
           nextPrompt = plan.prompt
           await this.update(operation, { stage: 'prepared', expected: plan.expected,
-            repair: { mode: plan.mode, invalidCalls: plan.invalidCalls, expectedKind: plan.expectedKind, failure: plan.failure,
+            repair: { attempt: plan.attempt, mode: plan.mode, invalidCalls: plan.invalidCalls, expectedKind: plan.expectedKind, failure: plan.failure,
               original: operation.identity!, candidateHash: plan.candidateHash, parentId: operation.parentId,
               promptHash: operation.promptHash, path: operation.verifiedPath! },
             parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined,
             finalStatus: undefined, promptHash: digest(nextPrompt) })
-          this.dependencies.log?.write('model.format-repair', { operationId: id, stage: plan.logStage, code: plan.failure.code, attempt: 1 })
+          this.dependencies.log?.write('model.format-repair', { operationId: id, stage: plan.logStage, code: plan.failure.code, attempt: plan.attempt })
           repairAttempt++
           continue
         }
