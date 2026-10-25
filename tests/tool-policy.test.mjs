@@ -50,6 +50,20 @@ test('native two-call batches recover internal grammar damage before execution a
  }
 })
 
+test('native DSML root-tail recovery executes a fixture once and preserves completed results', {timeout:15000},async()=>{
+ const f=await harness(),executed=[]
+ const remove=f.ctx.tools.register(defineTool({name:tool.name,description:'Inspect an existing marker only',parameters:{label:{type:'string'}},output:{schema:{type:'string'},render:(_,v)=>[{type:'text',text:v}]},execute:async(args)=>{executed.push(args.label);return 'Inspected existing marker'}}))
+ try{
+  const a=await f.create('root-tail-native')
+  f.web.answer=p=>p.messages.some(m=>m.role==='tool')?{protocol_version:1,request_id:p.request_id,kind:'final',text:'Existing marker inspected once'}:`<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="${tool.name}"><｜｜DSML｜｜ parameter name="arguments" string="false">{"label":"existing"}]</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>`
+  await f.ask(a,'Inspect the existing marker once')
+  const events=a.session.snapshotEvents()
+  assert.deepEqual(executed,['existing']);assert.equal(events.filter(e=>e.type==='tool/call').length,1);assert.equal(events.filter(e=>e.type==='tool/result').length,1)
+  assert.equal(events.findLast(e=>e.type==='turn/end').data.reason.kind,'completed');assert.equal(f.web.generations.length,2)
+  assert.equal((await f.adapter.inspect(a.id)).pending,undefined)
+ }finally{remove();await f.close()}
+})
+
 test('native execution occurs once after recovering a malformed correction response', {timeout:15000},async()=>{
  const f=await harness();let executions=0
  const remove=f.ctx.tools.register(defineTool({name:tool.name,description:'Inspect existing marker',parameters:{label:{type:'string'}},output:{schema:{type:'string'},render:(_,v)=>[{type:'text',text:v}]},execute:async(_,args)=>{executions++;return 'Existing artifact inspected'}}))

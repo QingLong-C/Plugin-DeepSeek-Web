@@ -9,6 +9,8 @@ const raw = JSON.stringify(args)
 const cases = [
   ['redundant root closer', raw + '}'],
   ['multiple redundant root closers', raw + '}}}'],
+  ['opposite redundant root closer', raw + ']'],
+  ['mixed redundant root closers', raw + ']}]}'],
   ['object trailing comma', raw.slice(0, -1) + ',}'],
   ['nested array trailing comma', raw.replace('[true,false,null,0]', '[true,false,null,0,]')],
   ['missing final object closer', raw.slice(0, -1)],
@@ -37,7 +39,7 @@ test('syntax recovery rejects ambiguous/incomplete values, duplicate keys, extra
   for (const body of [
     '{"command":"unterminated}', '{"command":}', '{"command":"one",',
     '{"command":"one","command":"two"}}', '{"nested":{"x":1,"x":2}}}',
-    '{"command":"one"}{"command":"two"}', '{"command":"one"}]',
+    '{"command":"one"}{"command":"two"}', '{"nested":{"x":1],"command":"one"}',
     '{command:"one"}', "{'command':'one'}", '{"command":undefined}',
     '{"command":1,,}', '{}'+ '}'.repeat(9), '{"x":'.repeat(65)+'0',
   ]) assert.throws(() => decodeResponse(wrap(body), [tool], 'op'), error => error.code === 'WEB_TOOL_FORMAT', body)

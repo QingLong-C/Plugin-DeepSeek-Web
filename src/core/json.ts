@@ -181,9 +181,9 @@ function grammarJson(tokens: JsonToken[], contract?: JsonContract): unknown {
       if (top === ':' && value) insert(':', replace('v'))
       if ((top === 'o' && token?.kind === 'string') || (top === 'r' && value)) insert(',', replace(top === 'o' ? 'k' : 'a'))
       if ((top === 'o' || top === 'r') && (raw === undefined || [',', '}', ']'].includes(raw))) insert(top === 'o' ? '}' : ']', s.stack.slice(0, -1))
-      // Only redundant copies of the root close are removable; internal delimiters
-      // and mismatched types may carry structure and cannot simply be discarded.
-      if (top === 'd' && raw === (tokens[0]!.raw === '{' ? '}' : ']')) put({ ...s, index: s.index + 1, edits: [...s.edits, [s.index, '']] }, cost + 1)
+      // Once the entire root is complete, either closing delimiter is surplus.
+      // Internal mismatches still carry structure and must not be discarded.
+      if (top === 'd' && (raw === '}' || raw === ']')) put({ ...s, index: s.index + 1, edits: [...s.edits, [s.index, '']] }, cost + 1)
     }
   }
   // A unique syntactic result must still reach the normal decoder, so its real

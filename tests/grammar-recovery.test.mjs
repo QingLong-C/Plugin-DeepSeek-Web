@@ -11,6 +11,32 @@ const command='printf \'%s\\n\' \'literal },{"name": [ : 中文\'\n# actual newl
 const envelope=id=>({protocol_version:1,request_id:id,kind:'tool',calls:[{name:'inspect',arguments:{command}},{name:'inspect',arguments:{command:'inspect only'}}]})
 const broken=id=>JSON.stringify(envelope(id)).replace('}},{"name"','},{"name"')
 
+test('complete roots tolerate every bounded combination of surplus closing delimiters without changing values',t=>{
+ const scalar='literal } ] { [ \\" 中文\nvalue'
+ const values=[{nested:[{scalar,enabled:false,count:0,empty:null}]},[{scalar},true,0,null]]
+ let cases=0
+ for(const value of values)for(let size=1;size<=8;size++)for(let bits=0;bits<2**size;bits++){
+  const tail=Array.from({length:size},(_,i)=>bits&(1<<i)?'}':']').join('')
+  let repaired=0
+  assert.deepEqual(JSON.parse(JSON.stringify(toolJson(JSON.stringify(value)+tail,()=>repaired++))),value,tail)
+  assert.equal(repaired,1);cases++
+ }
+ for(const raw of ['{"x":[1},"y":2}','{"nested":{"value":1],"end":true}','{"x":1}] {"y":2}','[1]} 2','[1]} prose','[1]},2','{"x":1}'+']'.repeat(9)])assert.throws(()=>toolJson(raw),raw)
+ t.diagnostic(`${cases} complete object/array roots with all mixed closing tails of length 1..8; internal mismatches, extra roots, values, prose and budget overflow rejected`)
+})
+
+test('DSML wrapped arguments with an opposite surplus close recover before model correction',async()=>{
+ for(const correction of [false,true]){
+ const f=await setup(),a=new TokenFreeAdapter({}, {store:f.store,native:f.native,credential:async()=>({token:'fixture',accountId:'fixture-owner'}),client:(_,c)=>f.web.client(f.log,c.operationId)})
+ f.web.answer=(p,_,n)=>correction&&n===1?'unrecognised damaged response':n===(correction?2:1)?`<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="inspect"><｜｜DSML｜｜ parameter name="arguments" string="false">${JSON.stringify({command})}]</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>`:{protocol_version:1,request_id:p.request_id,kind:'final',text:'Unverified completion must never replace the tool'}
+ try{
+  const chunks=await collect(a.stream({provider:PROVIDER,model:MODEL,messages:[{role:'user',content:[{type:'text',text:'Inspect the existing artifact'}]}],tools:[tool]}))
+  const calls=chunks.filter(c=>c.block?.type==='tool-call')
+  assert.equal(calls.length,1);assert.deepEqual(JSON.parse(calls[0].block.arguments),{command});assert.equal(f.web.generations.length,correction?2:1)
+ }finally{await a.dispose();await f.close()}
+ }
+})
+
 test('grammar recovery reconstructs an internal call boundary without changing either command',()=>{
  let repairs=0
  const blocks=decodeResponse(broken('op'),[tool],'op',undefined,()=>repairs++)

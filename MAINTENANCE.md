@@ -4,7 +4,7 @@
 
 本仓库独立维护，基于上游 `yuezengwu/dsh-tokenfree` 的 v0.2.0，提交 `6a57b2f9c512bacafe678868c08ef47bb7b484fe`。保留 MIT 许可。`README.upstream.md` 及其他上游设计、测试文档是继承资料，不能当作本维护版重新完成了全部实机验收。
 
-当前源码发行号为 `1.0.5`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
+当前源码发行号为 `1.0.6`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
 
 当前维护策略是保持目标环境已验收的发行包。后续排障先核对实际安装，不因单次报错、上游发版或官网模型改名自动升级。源码新增修复不等于目标环境已迁移；安装包使用对应 Release 的 SHA256SUMS 核对，纯维护文档提交不替换包、标签或 Release 资产。
 
@@ -19,10 +19,10 @@ shasum -a 256 -c SHA256SUMS
 DSH 的插件安装目标是 profile。CLI 可用且目标 profile 没有被桌面占用时，使用其原生安装命令，文件名替换成实际下载路径：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.5.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.6.tgz
 ```
 
-若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-1.0.5.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
+若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-1.0.6.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
 
 重启后核对实际安装版本、TokenFree 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。此前完整 `qinglong.3` 安装包已在 macOS DSH 0.2.1-rc.3 验证原长对话真实工具往返、双向模型选择和设置卡片；新环境及新修订版的安装仍需分别验收。
 
@@ -35,6 +35,8 @@ dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.5.tgz
 前端入口依赖活动 package 的 `dsh.client`、client export 与客户端文件，不能只验证主机插件。若设置页消失但仍能对话，应核对这些元数据与活动入口。
 
 ## 工具格式兼容
+
+运行时处理与维护分类见[错误分类与恢复规则](https://github.com/QingLong-C/Plugin-TokenFree/blob/main/maintenance/error-recovery.md)。规则保存在文档和 skill，实际校验及恢复由插件每次响应的共享入口执行，无需额外后台守卫。
 
 ### 统一语法恢复（v1.0.4）
 
@@ -50,7 +52,7 @@ dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.5.tgz
 
 结构搜索最多 8 次插入/删除、8,192 个词法 token、65,536 个搜索状态和每个状态 16 条候选路径；深度 64、恢复输入与编码后大小各不超过 2,621,440 字符。末尾逗号最多移除 32 处，响应根外格式符号最多 8 个。预算耗尽即拒绝，不采用尚未比较完的候选；token 指完整字符串、数值或标点单位，长命令字符串作为一个单位处理，不是模型计费 token。
 
-只能补冒号、逗号、由已存在容器确定的结束符，或移除同类多余根结束符；不会补起始容器、字段、引号、参数值、缺失命令片段或未知 DSML 标签。重复键、错配类型、多个根、混杂说明、坏转义与无法唯一解释的损坏进入纠正或准确终止。语法合法但意思错误的参数也无法仅凭解析识别，例如 `[12]` 不能推断本意是 `[1,2]`。
+只能补冒号、逗号、由已存在容器确定的结束符，或在完整根之后移除多余的 `}`、`]`（含混合组合，v1.0.6）；不会补起始容器、字段、引号、参数值、缺失命令片段或未知 DSML 标签。重复键、容器内部错配类型、多个根、混杂说明、坏转义与无法唯一解释的损坏进入纠正或准确终止。语法合法但意思错误的参数也无法仅凭解析识别，例如 `[12]` 不能推断本意是 `[1,2]`。
 
 自动纠正只修当前候选，不训练或永久改变官网模型。同一种损坏可能再次生成，但在本地支持范围内会再次按统一规则处理。输入已丢失内容、取消/关闭宿主、登录失效、官网过滤、未知协议变化等不能保证自动完成，更不能承诺所有错误永久消失。
 
