@@ -4,9 +4,9 @@ import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { TokenFreeError, record } from './errors.js'
 import type { Block, ModelInput, NativeAttempt, NativeBoundary, CompactionAnchor, OfficialBudget, WebIdentity, WebMessage, WebSnapshot, WebTransport } from './types.js'
-import { canonical, catalogueHash, encodeInput, encodeSummary, FinalDecoder, messageHash } from './codec.js'
+import { canonical, catalogueHash, encodeInput, encodeProtocolCorrection, encodeSummary, FinalDecoder, messageHash } from './codec.js'
 import { streamsFinal } from './policy.js'
-import { planRecovery, checkRecoveryResult } from './recovery.js'
+import { planRecovery, checkRecoveryResult, type RepairRelay } from './recovery.js'
 import type { UsageStatus } from './account-types.js'
 import { budgetFor, metricView, pressure } from './metrics.js'
 import { digest, LocalStore } from '../local/store.js'
@@ -15,7 +15,7 @@ import type { LocalDiagnostics } from '../local/diagnostics.js'
 import {RecoveryMemory,formatIssue,withRecoveryHints,type FormatIssue,type RecoverySolution} from '../local/recovery-memory.js'
 
 export type ModelEvent = { type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'result'; blocks: Block[]; operation: ActiveOperation } | { type: 'withdraw' }
-export interface SessionDependencies { store: LocalStore; storeId: string; native?: NativeBoundary; log?: LocalDiagnostics; maxPromptChars: number }
+export interface SessionDependencies { repairRelay?: RepairRelay; store: LocalStore; storeId: string; native?: NativeBoundary; log?: LocalDiagnostics; maxPromptChars: number }
 const terminal = (status: string) => ['FINISHED', 'INCOMPLETE', 'CONTENT_FILTER', 'CONTEXT_LENGTH_EXCEEDED', 'TIMEOUT', 'FAILED'].includes(status)
 const pathOf = (messages: WebMessage[], responseId: number) => {
   const map = new Map(messages.map(x => [x.id, x]))
@@ -135,7 +135,7 @@ export class SessionEngine {
     try {
       if (!(await this.settle(await this.store.pending(this.key(sessionId))))) throw new TokenFreeError('Settle the previous operation before reading current pressure.', 'PENDING_OPERATION')
       const session = await this.store.session(this.key(sessionId))
-      if (!session || session.needsRebase) return metricView(session)
+      if (!session || session.needsRebase || session.repairSource) return metricView(session)
       if (session.accountKey !== accountKey) return metricView({ ...session, metricsCurrent: false })
       if (inputHashes && (session.prefix.length > inputHashes.length || session.prefix.some((x, i) => x !== inputHashes[i]))) {
         // Edited/projected native history will bootstrap another chat; old branch pressure cannot trigger it.
@@ -241,7 +241,8 @@ export class SessionEngine {
     if (!cancelled && (saved.operationId !== operation.id || canonical(saved.message!.content) !== canonical(expected))) throw new TokenFreeError('Native result differs from the validated delivery; no cursor was advanced.', 'PENDING_OPERATION')
     const next: SessionState = {
       schemaVersion: 1, sessionKey: operation.sessionKey, sessionId: operation.sessionId!, storeId: operation.storeId, accountKey: operation.accountKey,
-      modelType: operation.identity?.modelType, thinking: operation.thinking, budget: operation.budget, metricsCurrent: !cancelled, metricsEpoch: operation.epoch,
+      modelType: operation.identity?.modelType, thinking: operation.thinking, budget: operation.budget, metricsCurrent: !cancelled && !operation.repairSource, metricsEpoch: operation.epoch,
+      ...(operation.repairSource ? {repairSource:operation.repairSource} : {}),
       compaction: previous?.compaction ? { ...previous.compaction, phase: 'complete', initializingChatId: undefined } : undefined,
       generation: operation.generation, chatId: operation.chatId ?? previous?.chatId, parentId: operation.identity?.responseId ?? previous?.parentId ?? null,
       prefix: [...operation.inputHashes, ...(saved.message ? [messageHash(saved.message)] : [])],
@@ -390,7 +391,7 @@ export class SessionEngine {
       const hashes = input.messages.map(messageHash)
       const instructionHash = digest(canonical([input.system, input.instructions]))
       const toolsHash = catalogueHash(input.tools)
-      const rebase = !previous || previous.needsRebase || previous.accountKey !== accountKey || previous.prefix.length > hashes.length
+      const rebase = !previous || previous.needsRebase || Boolean(previous.repairSource) || previous.accountKey !== accountKey || previous.prefix.length > hashes.length
         || previous.prefix.some((hash, i) => hashes[i] !== hash)
       if (summary && (previous?.accountKey !== accountKey || !previous?.chatId || !previous.webPath?.length || !client.editRoot)) throw new TokenFreeError('A confirmed original chat for this account and root editor are required for compaction.', 'COMPACTION_UNAVAILABLE')
       if (previous && !summary && ['awaiting-checkpoint', 'failed'].includes(previous.compaction?.phase ?? '')) throw new TokenFreeError('The previous compaction needs native verification or an explicit manual retry.', 'COMPACTION_PENDING')
@@ -505,32 +506,60 @@ export class SessionEngine {
           budget: await metadata(active => this.settingsBudget(client, response.modelType ?? operation!.identity?.modelType, input.thinking, active)) })
         this.dependencies.log?.content(id, 'metrics.observed', { identity: operation.identity, count: operation.usage, source: operation.usageSource, observedAt: operation.usageObservedAt, budget: operation.budget, thinking: input.thinking })
         this.dependencies.log?.content(id, 'web.response', { formatStage: repairAttempt ? 'repair' : 'initial', text: raw })
-        let blocks: Block[]
+        let blocks: Block[] | undefined
         let localRepaired=false
-        try { blocks = validate(raw, id,()=>{localRepaired=true}) }
-        catch (error) {
+        try {
+          blocks = validate(raw, id,()=>{localRepaired=true})
+          checkRecoveryResult(operation.repair, operation.expected, input, blocks)
+        } catch (error) {
           const issue=formatIssue(error)
           if(issue)await remember(issue)
-          const plan = planRecovery(error, raw, input, id, this.dependencies.maxPromptChars, validate, {
-            summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair), previous: operation.repair,
-            finalPreview: streamsFinal(input.policy) && decoder.isFinal,
-            confirmed: operation.finalStatus === 'FINISHED' && Boolean(operation.identity && operation.verifiedPath),
-          })
-          if (!plan) throw error
-          signal.throwIfAborted()
-          repairRoute=plan.logStage as RecoverySolution
-          nextPrompt = withRecoveryHints(plan.prompt,learned,this.dependencies.maxPromptChars)
-          await this.update(operation, { stage: 'prepared', expected: plan.expected,
-            repair: { attempt: plan.attempt, mode: plan.mode, invalidCalls: plan.invalidCalls, expectedKind: plan.expectedKind, failure: plan.failure,
-              original: operation.identity!, candidateHash: plan.candidateHash, parentId: operation.parentId,
-              promptHash: operation.promptHash, path: operation.verifiedPath! },
-            parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined,
-            finalStatus: undefined, promptHash: digest(nextPrompt) })
-          this.dependencies.log?.write('model.format-repair', { operationId: id, stage: plan.logStage, code: plan.failure.code, attempt: plan.attempt })
-          repairAttempt++
-          continue
+          let plan:ReturnType<typeof planRecovery>
+          try {
+            plan = planRecovery(error, raw, input, id, this.dependencies.maxPromptChars, validate, {
+              summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair), previous: operation.repair,
+              finalPreview: streamsFinal(input.policy) && decoder.isFinal,
+              confirmed: operation.finalStatus === 'FINISHED' && Boolean(operation.identity && operation.verifiedPath),
+            })
+          } catch(exhausted) {
+            if(!this.dependencies.repairRelay || !operation.repair || !issue || !formatIssue(exhausted) || summary
+              || operation.finalStatus !== 'FINISHED' || !operation.identity || !operation.verifiedPath)throw exhausted
+            taskSignal.throwIfAborted()
+            // Each candidate remains bound to the original batch/type and current schemas.
+            // A secondary model receives no executor, native session identity or replay state.
+            const check=(text:string)=>{
+              const candidate=validate(text,id)
+              checkRecoveryResult(operation!.repair,operation!.expected,input,candidate)
+              if((shown || decoder?.isFinal) && candidate.some(b=>b.type==='tool-call'))throw new TokenFreeError('Final recovery cannot become a tool call.','WEB_TOOL_FORMAT')
+            }
+            const kind=(shown || decoder?.isFinal)?'final':operation.repair.expectedKind??(operation.repair.mode==='arguments'?'tool':'auto')
+            const prompt=encodeProtocolCorrection(input,id,this.dependencies.maxPromptChars,kind,{...issue,reason:error instanceof Error?error.message:'Format validation failed'},raw)
+            // The Web generation is complete; repair attempts have their own bounded timers.
+            signal=taskSignal;budgetSignal=undefined
+            const repaired=await this.dependencies.repairRelay({prompt,operationId:id,signal:taskSignal,validate:check})
+            taskSignal.throwIfAborted();check(repaired.text);blocks=validate(repaired.text,id)
+            raw=repaired.text
+            await this.update(operation,{repairSource:{provider:repaired.provider,model:repaired.model,candidateHash:digest(raw)}})
+            repairRoute='response-protocol'
+            this.dependencies.log?.content(id,'repair.relay',{stage:'adopted',source:operation.repairSource})
+          }
+          if(plan){
+            signal.throwIfAborted()
+            repairRoute=plan.logStage as RecoverySolution
+            nextPrompt = withRecoveryHints(plan.prompt,learned,this.dependencies.maxPromptChars)
+            await this.update(operation, { stage: 'prepared', expected: plan.expected,
+              repair: { attempt: plan.attempt, mode: plan.mode, invalidCalls: plan.invalidCalls, expectedKind: plan.expectedKind, failure: plan.failure,
+                original: operation.identity!, candidateHash: plan.candidateHash, parentId: operation.parentId,
+                promptHash: operation.promptHash, path: operation.verifiedPath! },
+              parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined,
+              finalStatus: undefined, promptHash: digest(nextPrompt) })
+            this.dependencies.log?.write('model.format-repair', { operationId: id, stage: plan.logStage, code: plan.failure.code, attempt: plan.attempt })
+            repairAttempt++
+            continue
+          }
+          if(!operation.repairSource)throw error
         }
-        checkRecoveryResult(operation.repair, operation.expected, input, blocks)
+        if(!blocks)throw new TokenFreeError('Recovery produced no validated blocks.','WEB_TOOL_FORMAT')
         if(localRepaired)await remember({stage:'syntax',code:'WEB_TOOL_FORMAT'})
         for(const issue of issues.values())await remember(issue,repairRoute??'local-syntax')
         const textBlock = blocks.find(x => x.type === 'text')

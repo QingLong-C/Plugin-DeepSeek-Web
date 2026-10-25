@@ -17,14 +17,14 @@ import{DshBoundary}from'../lib/dsh/native.js'
 import{setup,tool,payload,frame,snapshot,sse}from'./helpers/fixture.mjs'
 const definition=(name=tool.name,description='Initial schema')=>defineTool({name,description,parameters:{},output:{schema:{type:'string'},render:(_,v)=>[{type:'text',text:v}]},execute:async()=> 'fixture result'})
 const message=text=>createUserMessage({content:[{type:'text',text}],source:{kind:'user'}})
-async function harness(){
+async function harness(repairRelay){
  const f=await setup(),ctx=new Context();let adapter
  for(const p of[SessionStore,AgentRegistry,LlmRuntime,SessionProjectionRegistry,ToolRuntime,SystemPrompt])await ctx.plugin(p)
  ctx.on('session/flush',async session=>writeFile(join(f.home,session.id+'.json'),JSON.stringify(session.snapshotEvents())))
  const native=new DshBoundary(ctx,a=>adapter?.reconcile(a))
  let bridge;let layer
  const load=async()=>{layer=await ctx.plugin(scope=>{bridge=new ToolPolicyBridge(scope,(id,op)=>adapter.toolCatalogueForCall(id,op))})};await load()
- adapter=new TokenFreeAdapter({sessionStoreId:'tool-policy'}, {store:f.store,native,credential:async()=>({token:'fixture-secret-token',accountId:'fixture-owner'}),client:(_,c)=>f.web.client(f.log,c.operationId),toolCatalogue:id=>bridge.catalogue(id),checkTools:(id,blocks,snapshot)=>bridge.check(id,blocks,snapshot)})
+ adapter=new TokenFreeAdapter({sessionStoreId:'tool-policy'}, {store:f.store,native,repairRelay,credential:async()=>({token:'fixture-secret-token',accountId:'fixture-owner'}),client:(_,c)=>f.web.client(f.log,c.operationId),toolCatalogue:id=>bridge.catalogue(id),checkTools:(id,blocks,snapshot)=>bridge.check(id,blocks,snapshot)})
  ctx.llm.registerAdapter([PROVIDER],adapter);await ctx.plugin(AgentLoop,{agents:[]})
  const create=id=>ctx.agentLoop.create(SessionId(id),{provider:PROVIDER,model:MODEL})
  const ask=async(a,text)=>{a.followup(message(text));await a.whenIdle();await adapter.reconcile(a.id)}
@@ -218,5 +218,51 @@ test('native outer dispatch cannot bypass changed inner definitions or the searc
   const a=await f.create('nested-transport')
   f.web.answer=p=>p.messages.some(x=>x.role==='tool')?{protocol_version:1,request_id:p.request_id,kind:'final',text:'Done'}:{protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:'outer_tool',arguments:{}}]}
   await f.ask(a,'Use only the fixture transport');assert.deepEqual(denials,[true,true]);assert.equal(innerRuns,0);assert.equal(searchRuns,0)
+ }finally{remove();await f.close()}
+})
+
+
+test('external repair is invisible to healthy tasks and resumes the original native task on a fresh web context', {timeout:15000},async()=>{
+ let relayCalls=0
+ const relay=async request=>{
+  relayCalls++
+  const p=payload(request.prompt)
+  assert.throws(()=>request.validate(JSON.stringify({protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:'unknown',arguments:{}}]})))
+  const text=JSON.stringify({protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:tool.name,arguments:{}}]})
+  request.validate(text);return {text,provider:'minimax',model:'fixture-free'}
+ }
+ const f=await harness(relay);let executed=0
+ const remove=f.ctx.tools.register({...definition(),execute:async()=>{executed++;return 'Actual marker result'}})
+ try{
+  const healthy=await f.create('relay-healthy');await f.ask(healthy,'Normal final answer');assert.equal(relayCalls,0)
+  const agent=await f.create('relay-native')
+  f.web.answer=p=>p.messages.some(m=>m.role==='tool')?{protocol_version:1,request_id:p.request_id,kind:'final',text:'Continued from actual marker result'}:'broken envelope fixture'
+  await f.ask(agent,'Inspect the existing marker once')
+  const events=agent.session.snapshotEvents();assert.equal(relayCalls,1);assert.equal(executed,1)
+  assert.equal(events.filter(e=>e.type==='tool/call').length,1);assert.equal(events.filter(e=>e.type==='tool/result').length,1)
+  assert.equal(events.findLast(e=>e.type==='turn/end').data.reason.kind,'completed');assert.equal(f.web.generations.length,4)
+  assert.notEqual(f.web.generations[2].chat_session_id,f.web.generations[3].chat_session_id)
+  const resumed=payload(f.web.generations[3].prompt);assert(resumed.messages.some(m=>m.role==='tool'))
+  const source=events.find(e=>e.type==='assistant/message'&&e.data.message.content.some(b=>b.type==='tool-call')).data.message.source
+  assert.equal(source.replayState.response.repairSource.provider,'minimax')
+  assert.equal((await f.adapter.inspect(agent.id)).pending,undefined)
+  const {RecoveryMemory}=await import('../lib/local/recovery-memory.js')
+  const records=await new RecoveryMemory(f.home).all()
+  assert(records.some(r=>r.entries.some(e=>e.status==='resolved'&&e.solutions['response-protocol']===1)))
+  assert(f.web.generations[3].prompt.includes('DSH_LEARNED_FORMAT_RULES'))
+  const before=f.web.generations.length
+  f.web.answer=p=>({protocol_version:1,request_id:p.request_id,kind:'final',text:'Already valid'})
+  await f.ask(agent,'Only acknowledge this message')
+  assert.equal(f.web.generations.length,before+1);assert.equal(relayCalls,1);assert.equal(executed,1)
+ }finally{remove();await f.close()}
+})
+
+test('failed external repairs never dispatch tools or erase prior completed results', {timeout:15000},async()=>{
+ let relayCalls=0
+ const f=await harness(async()=>{relayCalls++;throw new Error('all repair routes failed')});let executed=0
+ const remove=f.ctx.tools.register({...definition(),execute:async()=>{executed++;return 'Actual marker result'}})
+ try{
+  const a=await f.create('relay-failed');f.web.answer=p=>p.messages.some(m=>m.role==='tool')?'broken final fixture':{protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:tool.name,arguments:{}}]}
+  await f.ask(a,'Inspect once then summarize');const e=a.session.snapshotEvents();assert.equal(executed,1);assert.equal(relayCalls,1);assert.equal(e.filter(x=>x.type==='tool/result').length,1);assert.notEqual(e.findLast(x=>x.type==='turn/end').data.reason.kind,'completed')
  }finally{remove();await f.close()}
 })

@@ -11,7 +11,9 @@ import { readdir, rm } from 'node:fs/promises'
 import { readCredential, saveCredential, normalizeCredential, type WebCredential } from './auth.js'
 
 export const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+export type RepairSource = {provider:string;model:string;candidateHash:string}
 export interface ActiveOperation {
+  repairSource?: RepairSource
   id: string
   kind?: 'compaction'
   compaction?: CompactionAnchor & { rootId: number; oldParentId: number; oldPath: { id: number; parentId: number | null; hash: string }[] }
@@ -53,6 +55,7 @@ export interface ActiveOperation {
 export interface AccountState { schemaVersion: 2; epoch: number; deviceId?: string; accountKey?: string; credentialHash?: string | null }
 interface SessionFile { schemaVersion: 2; confirmed?: SessionState; active?: ActiveOperation; policy?: PolicyState }
 export interface SessionState {
+  repairSource?: RepairSource
   schemaVersion: 1
   sessionKey: string
   sessionId: string
@@ -110,6 +113,7 @@ const repair = (v: unknown, chatId: unknown): boolean => v === undefined || (rec
   && (v.mode !== 'arguments' || Array.isArray(v.invalidCalls))
   && (v.failure === undefined || (record(v.failure) && ['syntax', 'envelope', 'tool', 'wrapper', 'arguments', 'policy', 'output'].includes(String(v.failure.stage))
     && ['WEB_TOOL_FORMAT', 'INVALID_TOOL_CALL', 'TOOL_CHOICE', 'OUTPUT_FORMAT', 'OUTPUT_SCHEMA'].includes(String(v.failure.code)))))
+const repairSource=(v:unknown)=>v===undefined||(record(v)&&text(v.provider)&&text(v.model)&&hash(v.candidateHash))
 function validOperation(v: unknown): boolean {
   if (!record(v)) return false
   return text(v.id) && hash(v.accountKey) && integer(v.epoch) && hash(v.sessionKey) && text(v.storeId) && integer(v.generation)
@@ -123,7 +127,7 @@ function validOperation(v: unknown): boolean {
       && integer(v.native.afterSeq) && (v.native.settlementSeq === undefined || integer(v.native.settlementSeq))
       && (v.native.abandoned === undefined || typeof v.native.abandoned === 'boolean') && text(v.native.attemptId) && text(v.native.instance)))
     && (v.rateRejected === undefined || typeof v.rateRejected === 'boolean')
-    && path(v.verifiedPath) && path(v.parentPath) && repair(v.repair, v.chatId)
+    && repairSource(v.repairSource) && path(v.verifiedPath) && path(v.parentPath) && repair(v.repair, v.chatId)
     && budget(v.budget) && (v.usage === undefined || integer(v.usage))
     && (v.kind === undefined ? v.compaction === undefined : v.kind === 'compaction' && anchor(v.compaction)
       && record(v.compaction) && v.compaction.sessionId === v.sessionId && v.compaction.thinking === v.thinking
@@ -219,7 +223,7 @@ export class LocalStore {
     // An absent legacy snapshot can be explicitly replaced after branch verification.
     // A present but malformed snapshot is still corruption, never treated as empty.
     if (value && value.tools === undefined) value = { ...value, tools: [], catalogueKnown: false }
-    if (value && (value.schemaVersion !== 1 || value.sessionKey !== key || !Array.isArray(value.prefix)
+    if (value && (!repairSource(value.repairSource) || value.schemaVersion !== 1 || value.sessionKey !== key || !Array.isArray(value.prefix)
       || !hashes(value.prefix) || !integer(value.generation) || !text(value.sessionId) || !text(value.storeId) || !hash(value.accountKey)
       || !hash(value.instructionsHash) || !hash(value.toolsHash) || !tools(value.tools) || (value.catalogueKnown !== undefined && typeof value.catalogueKnown !== 'boolean')
       || (value.executionTools !== undefined && !tools(value.executionTools)) || !path(value.webPath)

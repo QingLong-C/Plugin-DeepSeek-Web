@@ -90,7 +90,7 @@ export class LocalDiagnostics {
   }
 
   /** Explicit model/transport bodies only. Callers never supply headers or login responses. */
-  content(operationId: string, event: 'dsh.request' | 'web.request' | 'web.response' | 'dsh.response' | 'web.event' | 'operation.state' | 'native.commit' | 'validation' | 'preview' | 'metrics.observed', payload: object): void {
+  content(operationId: string, event: 'repair.relay' | 'dsh.request' | 'web.request' | 'web.response' | 'dsh.response' | 'web.event' | 'operation.state' | 'native.commit' | 'validation' | 'preview' | 'metrics.observed', payload: object): void {
     if (!this.logContent || !/^[a-f0-9-]{36}$/.test(operationId)) return
     let line: string
     try {

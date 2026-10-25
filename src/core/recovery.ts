@@ -99,3 +99,5 @@ export function checkRecoveryResult(repair: Repair | undefined, expected: Block[
     if (canonical(semantics(blocks)) !== canonical(semantics(expected ?? []))) fail('外壳修正改变了原本合法的调用或回答')
   }
 }
+
+export type RepairRelay = (request:{prompt:string;operationId:string;signal:AbortSignal;validate:(text:string)=>void})=>Promise<{text:string;provider:string;model:string}>

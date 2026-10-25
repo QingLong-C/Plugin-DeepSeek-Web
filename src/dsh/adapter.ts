@@ -1,3 +1,5 @@
+import type {RepairRelay} from '../core/recovery.js'
+import type {RelayConfig} from './repair-relay.js'
 import { LlmAdapter, LlmError, ReasoningEffortId, ToolCallId, attributionHeaders, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, StreamChunk, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
@@ -21,8 +23,9 @@ import type { LocalDiagnostics } from '../local/diagnostics.js'
 
 export const PROVIDER = 'tokenfree-deepseek-web'
 export const MODEL = 'web-default'
-export interface Config { credentialFile?: string; timeoutMs?: number; maxPromptChars?: number; logContent?: boolean; sessionStoreId?: string }
+export interface Config { repairRelay?: RelayConfig; credentialFile?: string; timeoutMs?: number; maxPromptChars?: number; logContent?: boolean; sessionStoreId?: string }
 export interface AdapterDependencies {
+  repairRelay?: RepairRelay
   credential?: (signal: AbortSignal) => Promise<WebCredential>
   signal?: () => AbortSignal
   authRejected?: (credential: WebCredential) => Promise<void>
@@ -65,7 +68,7 @@ export class TokenFreeAdapter extends LlmAdapter {
   engine(): Promise<SessionEngine> {
     return this.enginePromise ??= (async () => new SessionEngine({ store: this.store,
       storeId: digest(this.config.sessionStoreId ? ['custom', this.config.sessionStoreId] : ['jsonl', await canonicalPath(dshHomePath('sessions'))]),
-      native: this.dependencies.native, log: this.dependencies.diagnostics, maxPromptChars: this.maxPromptChars }))()
+      native: this.dependencies.native, log: this.dependencies.diagnostics, maxPromptChars: this.maxPromptChars, repairRelay: this.dependencies.repairRelay }))()
   }
   override providerInfo(provider: string) { return { id: provider, name: 'TokenFree · DeepSeek Web' } }
   override providerRetryPolicy() { return resolveRetryPolicy({ mode: 'normal', maxRetries: 0 }, 'dsh-tokenfree.retryPolicy') }
@@ -285,6 +288,7 @@ export class TokenFreeAdapter extends LlmAdapter {
           yield { type: 'finish', reason: { kind: event.blocks.some(x => x.type === 'tool-call') ? 'tool-calls' : 'stop' }, replayState: { response: {
             schemaVersion: 1, operationId: event.operation.id, accountKey, sessionId: options.sessionId ?? null,
             sessionKey: event.operation.sessionKey, generation: event.operation.generation, ...event.operation.identity,
+            ...(event.operation.repairSource ? {repairSource:event.operation.repairSource} : {}),
           } } }
           log?.write('model.completed', { operationId, elapsedMs: Date.now() - started })
         }

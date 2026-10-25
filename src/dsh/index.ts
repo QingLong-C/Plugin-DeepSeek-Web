@@ -1,3 +1,4 @@
+import {createRepairRelay} from './repair-relay.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { TokenFreeAdapter, PROVIDER } from './adapter.js'
 import type { Config } from './adapter.js'
@@ -28,6 +29,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const tools = new ToolPolicyBridge(ctx, (sessionId, operationId) => adapter!.toolCatalogueForCall(sessionId, operationId))
   const native = new DshBoundary(ctx, attempt => adapter?.reconcile(attempt))
   adapter = new TokenFreeAdapter(config, {
+    ...(config.repairRelay ? {repairRelay:createRepairRelay(ctx,dirname(config.credentialFile ?? defaultCredentialFile()),config.repairRelay,log)} : {}),
     credential: signal => account.credential(signal),
     signal: () => account.requestSignal(),
     authRejected: credential => account.requireVerification(credential),
