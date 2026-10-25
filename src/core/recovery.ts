@@ -6,7 +6,7 @@ import type { Block, ModelInput } from './types.js'
 
 type Repair = NonNullable<ActiveOperation['repair']>
 type Validate = (text: string, id: string) => Block[]
-interface Admission { summary: boolean; shown: boolean; attempted: boolean; confirmed: boolean; previous?: Repair }
+interface Admission { summary: boolean; shown: boolean; finalPreview?: boolean; attempted: boolean; confirmed: boolean; previous?: Repair }
 interface Plan {
   attempt: 1 | 2
   prompt: string
@@ -24,9 +24,14 @@ const calls = (blocks: Block[]) => blocks.filter(block => block.type === 'tool-c
 export function planRecovery(error: unknown, raw: string, input: ModelInput, id: string, maxChars: number, validate: Validate, admission: Admission): Plan | undefined {
   const outputFailure = error instanceof TokenFreeError && ['INVALID_TOOL_CALL', 'TOOL_CHOICE', 'OUTPUT_FORMAT', 'OUTPUT_SCHEMA'].includes(error.code)
   if (!(error instanceof WebResponseFormatError) && !outputFailure) return
-  if (admission.summary || admission.shown || !admission.confirmed) return
+  if (admission.summary || !admission.confirmed) return
+  const required = input.policy?.tools.mode === 'required' || input.policy?.tools.mode === 'named'
+  const finalPreview = admission.shown || admission.finalPreview
+  // A streamed final is provisional until block-end. It may only be replaced by
+  // a validated final: never promote an already visible answer into tool execution.
+  if (finalPreview && required) return
   const previous = admission.previous
-  const refine = admission.attempted && previous?.mode === 'protocol' && (previous.attempt ?? 1) === 1 && error instanceof ToolArgumentsError
+  const refine = !finalPreview && admission.attempted && previous?.mode === 'protocol' && (previous.attempt ?? 1) === 1 && error instanceof ToolArgumentsError
   const attempt = refine ? 2 : 1
   if (admission.attempted && !refine) {
     const count = previous?.attempt === 2 ? '两次' : '一次'
@@ -35,6 +40,8 @@ export function planRecovery(error: unknown, raw: string, input: ModelInput, id:
     throw new TokenFreeError(`已自动纠正${count}，${reason}；本步骤未执行工具。`, error.code)
   }
   const failure = { stage: error instanceof WebResponseFormatError ? error.stage : error.code === 'INVALID_TOOL_CALL' ? 'arguments' : error.code === 'TOOL_CHOICE' ? 'policy' : 'output', code: error.code }
+  if (finalPreview) return { attempt, prompt: encodeProtocolCorrection(input, id, maxChars, 'final', { ...failure, reason: error.message }), mode: 'protocol', expectedKind: 'final',
+    candidateHash: digest(raw), failure, logStage: 'final-response' }
   if (error instanceof ToolArgumentsError && error.code === 'INVALID_TOOL_CALL') {
     // A complete decoded batch exists; freeze its valid calls while the model fixes invalid arguments.
     const expected = decodeResponse(raw, input.tools), batch = calls(expected)
@@ -64,7 +71,6 @@ export function planRecovery(error: unknown, raw: string, input: ModelInput, id:
       // The complete wrapper candidate also fails policy/schema; never freeze it as a valid intent.
     }
   }
-  const required = input.policy?.tools.mode === 'required' || input.policy?.tools.mode === 'named'
   const final = input.policy?.tools.mode === 'none' || !input.tools.length || failure.stage === 'output'
     || error instanceof WebResponseFormatError && error.intent === 'final'
   const expectedKind = required ? 'tool' : final ? 'final' : error instanceof WebResponseFormatError && error.intent === 'tool' ? 'tool' : 'auto'

@@ -491,6 +491,7 @@ export class SessionEngine {
         catch (error) {
           const plan = planRecovery(error, raw, input, id, this.dependencies.maxPromptChars, validate, {
             summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair), previous: operation.repair,
+            finalPreview: streamsFinal(input.policy) && decoder.isFinal,
             confirmed: operation.finalStatus === 'FINISHED' && Boolean(operation.identity && operation.verifiedPath),
           })
           if (!plan) throw error

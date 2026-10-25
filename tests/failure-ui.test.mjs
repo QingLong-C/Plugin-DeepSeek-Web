@@ -48,12 +48,12 @@ test('built client replaces only withdrawal rows, preserves native fallback and 
       ['CONTENT_RETRACTED', 'Web response did not complete (CONTENT_FILTER).', '官网内容过滤'],
       ['CONTENT_RETRACTED', 'DeepSeek 官网内容过滤（CONTENT_FILTER）：本次回答已被官网拦截或撤回。', '官网内容过滤'],
       ['CONTENT_RETRACTED', 'Web response was withdrawn.', '官网撤回了回答'],
-      ['WEB_TOOL_FORMAT', 'Invalid or ambiguous DSML tool batch. No tools were executed.', '工具参数格式错误'],
+      ['WEB_TOOL_FORMAT', 'Invalid or ambiguous DSML tool batch. No tools were executed.', '响应协议格式错误'],
       ['INVALID_TOOL_CALL', 'Strict argument schema mismatch.', '工具参数不符合规则'],
       ['INVALID_TOOL_CALL', '已自动纠正一次，参数仍不合格。', '工具参数不符合规则'],
-      ['WEB_TOOL_FORMAT', '已自动纠正一次，工具协议仍不完整或不合规。', '工具参数格式错误'],
+      ['WEB_TOOL_FORMAT', '已自动纠正一次，工具协议仍不完整或不合规。', '响应协议格式错误'],
       ['INVALID_TOOL_CALL', '已自动纠正两次，参数仍不合格。', '工具参数不符合规则'],
-      ['WEB_TOOL_FORMAT', '已自动纠正两次，返回协议仍不合格。', '工具参数格式错误'],
+      ['WEB_TOOL_FORMAT', '已自动纠正两次，返回协议仍不合格。', '响应协议格式错误'],
       ['OUTPUT_SCHEMA', 'Strict final output schema mismatch.', '回答格式不符合规则'],
       ['OUTPUT_FORMAT', '已自动纠正一次，输出仍不合格。', '回答格式不符合规则'],
       ['TOOL_CHOICE', '已自动纠正一次，工具选择仍不合格。', '工具选择不符合规则'],
@@ -61,8 +61,8 @@ test('built client replaces only withdrawal rows, preserves native fallback and 
       const ui = render(React.createElement(winner().component, props(code, message)))
       assert.ok(ui.getByText(heading))
       assert.ok(ui.getByText(code))
-      if (message.includes('已自动纠正一次')) assert.match(ui.container.textContent, code === 'WEB_TOOL_FORMAT' ? /已自动纠正一次，工具协议仍未通过校验/ : /已自动纠正一次，返回参数仍未通过规则/)
-      if (message.includes('已自动纠正两次')) assert.match(ui.container.textContent, code === 'WEB_TOOL_FORMAT' ? /已自动纠正两次，工具协议仍未通过校验/ : /已自动纠正两次，返回参数仍未通过规则/)
+      if (message.includes('已自动纠正一次')) assert.match(ui.container.textContent, code === 'WEB_TOOL_FORMAT' ? /已自动纠正一次，回答或工具协议仍未通过校验/ : /已自动纠正一次，返回参数仍未通过规则/)
+      if (message.includes('已自动纠正两次')) assert.match(ui.container.textContent, code === 'WEB_TOOL_FORMAT' ? /已自动纠正两次，回答或工具协议仍未通过校验/ : /已自动纠正两次，返回参数仍未通过规则/)
       if (code === 'RATE_LIMIT') {
         assert.match(ui.container.textContent, /稍后继续未完成步骤/)
         assert.equal(ui.container.textContent.includes('撤回'), false)

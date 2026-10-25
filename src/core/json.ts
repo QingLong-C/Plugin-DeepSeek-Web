@@ -60,7 +60,7 @@ export function unfence(text: string): string {
   return /^[ \t\r\n]*```(?:json|xml|dsml)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t\r\n]*$/i.exec(text)?.[1] ?? text
 }
 
-/** Recover punctuation only. Keys, scalar tokens and string bytes are never synthesized or changed. */
+/** Recover punctuation and string encoding only; decoded keys and scalar values never change. */
 export function toolJson(text: string, recovered?: () => void, envelopeFraming = false): unknown {
   try { return strictJson(text) } catch { /* Try one bounded local normalization. */ }
   if (text.length > 2_621_440) throw new Error('Tool JSON exceeds recovery limit')
@@ -69,11 +69,19 @@ export function toolJson(text: string, recovered?: () => void, envelopeFraming =
     const value = strictJson(source)
     recovered?.(); return value
   } catch { /* The candidate still needs punctuation normalization. */ }
-  const stack: string[] = [], removed = new Set<number>()
-  let quoted = false, escape = false, started = false, rootClose = '', extras = 0, framing = 0
+  const stack: string[] = [], removed = new Set<number>(), encoded = new Map<number, string>()
+  let quoted = false, escape = false, started = false, rootClose = '', extras = 0, framing = 0, encodingGrowth = 0
   for (let i = 0; i < source.length; i++) {
     const char = source[i]!
     if (quoted) {
+      // A literal control code has one JSON encoding and the same decoded value.
+      // Do not reinterpret a backslash followed by a raw newline or another bad escape.
+      if (!escape && char.charCodeAt(0) < 32) {
+        const replacement = JSON.stringify(char).slice(1, -1)
+        encodingGrowth += replacement.length - 1
+        if (source.length + encodingGrowth > 2_621_440) throw new Error('Normalized tool JSON exceeds recovery limit')
+        encoded.set(i, replacement)
+      }
       if (!escape && char === '"') quoted = false
       if (!escape && char === '\\') escape = true
       else escape = false
@@ -111,9 +119,12 @@ export function toolJson(text: string, recovered?: () => void, envelopeFraming =
   if (!started || quoted || stack.length > 8) throw new Error('Incomplete JSON value')
   const pieces: string[] = []
   let cursor = 0
-  for (const index of removed) { pieces.push(source.slice(cursor, index)); cursor = index + 1 }
+  for (const index of [...removed, ...encoded.keys()].sort((a, b) => a - b)) {
+    pieces.push(source.slice(cursor, index), encoded.get(index) ?? ''); cursor = index + 1
+  }
   pieces.push(source.slice(cursor), ...stack.reverse())
   const candidate = pieces.join('')
+  if (candidate.length > 2_621_440) throw new Error('Normalized tool JSON exceeds recovery limit')
   if (candidate === text) throw new Error('No supported JSON syntax repair')
   const value = strictJson(candidate) // duplicate keys, missing values and invalid tokens still reject the whole batch
   recovered?.()

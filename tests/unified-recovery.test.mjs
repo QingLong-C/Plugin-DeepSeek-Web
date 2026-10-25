@@ -83,7 +83,7 @@ test('protocol corruption cannot mask a subsequent official filter or inconsiste
    return sse(ready+frame(snapshot(raw)))
   }
   try{await assert.rejects(async()=>{for await(const c of a.stream(options()))chunks.push(c)},e=>e.code===(mode==='filter'?'CONTENT_RETRACTED':mode==='history'?'WEB_IDENTITY':'WEB_TOOL_FORMAT'))
-   assert.equal(f.web.generations.length,1);assert.equal(chunks.some(c=>c.blockType==='tool-call'),false)
+   assert.equal(f.web.generations.length,mode==='partial-text'?2:1);assert.equal(chunks.some(c=>c.blockType==='tool-call'),false)
   }finally{await a.dispose();await f.close()}
  }
 })
@@ -152,7 +152,8 @@ test('one controller owns admission across failure stages and excludes transport
  for(const stage of ['syntax','envelope','tool','wrapper'])for(const summary of [false,true])for(const shown of [false,true])for(const confirmed of [false,true]){
   const error=new WebResponseFormatError('fixture',stage),raw=stage==='wrapper'?JSON.stringify({kind:'tool',calls:[{name:tool.name,arguments:{}}]}):'broken'
   const plan=planRecovery(error,raw,input,id,120000,validate,{summary,shown,confirmed,attempted:false})
-  assert.equal(Boolean(plan),!summary&&!shown&&confirmed)
+  assert.equal(Boolean(plan),!summary&&confirmed)
+  if(plan&&shown)assert.equal(plan.expectedKind,'final')
  }
  for(const code of ['AUTH','RATE_LIMIT','TRANSPORT','WEB_DISCONNECTED','WEB_IDENTITY','WEB_CONTEXT_CHANGED','CONTENT_RETRACTED','TOOL_CHANGED','TOOL_BINDING','STATE_STORAGE','INPUT_TOO_LARGE','UNSUPPORTED_SCHEMA']){
   assert.equal(planRecovery(new TokenFreeError('fixture',code),'broken',input,id,120000,validate,{summary:false,shown:false,confirmed:true,attempted:false}),undefined)

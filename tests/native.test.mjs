@@ -74,6 +74,48 @@ test('actual DSH AgentLoop persists two turns and reuses Web chat through public
   } finally { await adapter?.dispose(); await ctx.fiber.dispose(); await f.close() }
 })
 
+test('actual DSH AgentLoop commits complete multiline finals and replaces malformed previews without any tool replay', { timeout: 15000 }, async () => {
+  for (const scenario of ['raw-controls', 'replace-preview', 'deny-tool']) {
+    const f = await setup(), ctx = new Context()
+    let adapter
+    const answer = 'Verified completed results\n\n| check | status |\n|---|---|\n| existing artifact | done |\n\tNo repeated actions.'
+    try {
+      for (const plugin of [SessionStore, AgentRegistry, LlmRuntime, SessionProjectionRegistry, ToolRuntime, SystemPrompt]) await ctx.plugin(plugin)
+      const persisted = join(f.home, 'response-boundary-events.json')
+      ctx.on('session/flush', async session => { await writeFile(persisted, JSON.stringify(session.snapshotEvents())) })
+      let native
+      await ctx.plugin({ name: 'response-boundary-native', inject: ['llm', 'sessions'], apply(scope) {
+        native = new DshBoundary(scope, attempt => adapter?.reconcile(attempt))
+        scope.effect(() => async () => { await adapter?.dispose() })
+      } })
+      adapter = new TokenFreeAdapter({ sessionStoreId: 'response-boundary-native' }, { store: f.store, native,
+        credential: async () => ({ token: 'fixture', accountId: 'fixture-owner' }), client: (_, c) => f.web.client(c.diagnostics, c.operationId) })
+      f.web.answer = (p, _, n) => scenario === 'raw-controls'
+        ? `{"protocol_version":1,"request_id":${JSON.stringify(p.request_id)},"kind":"final","text":"${answer}"}`
+        : n === 1 ? JSON.stringify({ protocol_version: 1, request_id: p.request_id, kind: 'final', text: 'provisional preview', unexpected: true })
+          : scenario === 'deny-tool' ? { protocol_version: 1, request_id: p.request_id, kind: 'tool', calls: [{ name: 'never_execute', arguments: {} }] }
+            : { protocol_version: 1, request_id: p.request_id, kind: 'final', text: answer }
+      ctx.llm.registerAdapter([PROVIDER], adapter)
+      await ctx.plugin(AgentLoop, { agents: [] })
+      const id = SessionId('native-final-boundary'), agent = await ctx.agentLoop.create(id, { provider: PROVIDER, model: MODEL })
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Report existing results only; do not repeat earlier actions.' }], source: { kind: 'user' } }))
+      await agent.whenIdle(); await adapter.reconcile()
+      await ctx.sessions.flush(agent.session)
+      const events = JSON.parse(await readFile(persisted, 'utf8'))
+      assert.equal(events.filter(e => e.type === 'tool/call').length, 0)
+      assert.equal(events.filter(e => e.type === 'tool/result').length, 0)
+      assert.equal(f.web.generations.length, scenario === 'raw-controls' ? 1 : 2)
+      assert.equal(await f.store.pending((await adapter.engine()).key(id)), undefined)
+      if (scenario !== 'deny-tool') {
+        const message = events.filter(e => e.type === 'assistant/message').at(-1)
+        assert.equal(message.data.message.content.filter(b => b.type === 'text').map(b => b.text).join(''), answer)
+        assert.equal(message.data.interrupted, undefined)
+        assert.equal(events.filter(e => e.type === 'turn/end').at(-1).data.reason.kind, 'completed')
+      } else assert.notEqual(events.filter(e => e.type === 'turn/end').at(-1).data.reason.kind, 'completed')
+    } finally { await adapter?.dispose(); await ctx.fiber.dispose(); await f.close() }
+  }
+})
+
 test('native observation refuses no persistence and ambiguous cold attempts; exact persisted end sequence disambiguates', async () => {
   const callbacks = new Map()
   let durable = false, disposed = 0, cold = false

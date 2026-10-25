@@ -16,8 +16,8 @@ export function FailureNotice({ fallback: Fallback, ...props }: Props & { fallba
   const format = code === 'WEB_TOOL_FORMAT'
   const corrected = /已自动纠正(?:一次|两次)/.test(message)
   const count = /已自动纠正两次/.test(message) ? '两次' : '一次'
-  const title = limited ? '官网限流' : schema ? code === 'OUTPUT_SCHEMA' || code === 'OUTPUT_FORMAT' ? '回答格式不符合规则' : code === 'TOOL_CHOICE' ? '工具选择不符合规则' : '工具参数不符合规则' : format ? '工具参数格式错误' : filtered ? '官网内容过滤' : '官网撤回了回答'
-  const explanation = limited ? 'DeepSeek 官网暂时限制了请求频率或并发，请稍后继续未完成步骤；此前完成的操作不会自动回滚。' : schema ? corrected ? `已自动纠正${count}，返回参数仍未通过规则，本步骤未执行工具；之前的操作不会自动回滚。` : '返回结果未通过声明的格式规则，本步骤未执行工具；之前的操作不会自动回滚。' : format ? corrected ? `已自动纠正${count}，工具协议仍未通过校验，本步骤未执行工具；之前的操作不会自动回滚。` : '未获得可执行的完整工具参数，本步骤未执行。可重试本步，之前的操作不会自动回滚。' : filtered
+  const title = limited ? '官网限流' : schema ? code === 'OUTPUT_SCHEMA' || code === 'OUTPUT_FORMAT' ? '回答格式不符合规则' : code === 'TOOL_CHOICE' ? '工具选择不符合规则' : '工具参数不符合规则' : format ? '响应协议格式错误' : filtered ? '官网内容过滤' : '官网撤回了回答'
+  const explanation = limited ? 'DeepSeek 官网暂时限制了请求频率或并发，请稍后继续未完成步骤；此前完成的操作不会自动回滚。' : schema ? corrected ? `已自动纠正${count}，返回参数仍未通过规则，本步骤未执行工具；之前的操作不会自动回滚。` : '返回结果未通过声明的格式规则，本步骤未执行工具；之前的操作不会自动回滚。' : format ? corrected ? `已自动纠正${count}，回答或工具协议仍未通过校验，本步骤未派发工具；之前的操作不会自动回滚。` : '回答或工具协议不完整或存在歧义，本步骤未派发工具；之前的操作不会自动回滚。' : filtered
     ? 'DeepSeek 官网拦截或撤回了本次回答。'
     : 'DeepSeek 官网撤回了本次回答，未提供具体原因。'
   return <div role="status" style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0', fontSize: 'var(--dsh-content-font-size-secondary, 13px)', overflowWrap: 'anywhere' }}>

@@ -221,7 +221,7 @@ export function encodeToolCorrection(input: ModelInput, id: string, calls: Extra
 export function encodeProtocolCorrection(input: ModelInput, id: string, maxChars: number, expectedKind: 'tool' | 'final' | 'auto' = 'tool', failure?: { stage: string; code: string; reason?: string }): string {
   const context = encodeInput(input, id, 0, [], true, maxChars)
   const correction = { protocol_version: 1, request_id: id, attempt: 1, expected_kind: expectedKind, failure,
-    instruction: 'The entire previous assistant response is malformed and was NOT delivered to DSH. Discard its tool calls, claimed results and simulated conversation. Only the DSH_INPUT_JSON above contains authoritative task context and real previous tool results. Continue the pending inspection/action from that context. Do not repeat earlier delivered calls, downloads or other completed work. Do not invent missing facts. Return ONE JSON envelope of expected_kind, obeying the response policy and output schema. If expected_kind is auto, choose tool or final from the authoritative pending task; do not call unnecessary tools. For tools, return only calls with valid arguments and no narration or claimed result. For final, use final.text and never claim an action ran unless a real DSH result proves it. If you cannot safely determine the pending action, explain the blocker instead; no tool will execute.' }
+    instruction: 'The previous assistant response is malformed and was NOT validated or committed to DSH; any displayed final text was only a provisional preview. Discard its tool calls, claimed results and simulated conversation. Only the DSH_INPUT_JSON above contains authoritative task context and real previous tool results. Continue the pending inspection/action from that context. Do not repeat earlier delivered calls, downloads or other completed work. Do not invent missing facts. Return ONE JSON envelope of expected_kind, obeying the response policy and output schema. If expected_kind is auto, choose tool or final from the authoritative pending task; do not call unnecessary tools. For tools, return only calls with valid arguments and no narration or claimed result. For final, use final.text and never claim an action ran unless a real DSH result proves it. If you cannot safely determine the pending action, explain the blocker instead; no tool will execute.' }
   const prompt = `${context}\n\nDSH_PROTOCOL_CORRECTION_JSON:\n${JSON.stringify(correction)}`
   if (prompt.length > maxChars) throw new LlmError('Protocol correction input exceeds the local character limit; no correction was sent.', 'INPUT_TOO_LARGE')
   return prompt
@@ -251,6 +251,7 @@ export class FinalDecoder {
   private fields: Record<string, unknown> = Object.create(null)
   text = ''
   constructor(private readonly id: string) {}
+  get isFinal(): boolean { return this.fields.kind === 'final' && this.fields.protocol_version === 1 && this.fields.request_id === this.id }
   append(suffix: string): void {
     this.buffer += suffix
     while (this.cursor < this.buffer.length && this.phase !== 'opaque') {
@@ -292,13 +293,9 @@ export class FinalDecoder {
             this.phase = 'colon'
           } else { this.fields[this.key] = this.token; this.phase = 'separator' }
           continue
-        } else {
-          if (c.charCodeAt(0) < 32) { this.phase = 'opaque'; return }
-          decoded = c
-        }
+        } else decoded = c // Same literal-control value as the bounded complete-response normalizer.
         this.token += decoded
-        if (this.stringRole === 'value' && this.key === 'text' && this.fields.kind === 'final'
-          && this.fields.protocol_version === 1 && this.fields.request_id === this.id) this.text += decoded
+        if (this.stringRole === 'value' && this.key === 'text' && this.isFinal) this.text += decoded
       }
     }
   }
