@@ -6,6 +6,7 @@ import { defaultPolicy, oneShot, parsePolicy } from '../core/policy.js'
 import { record, TokenFreeError } from '../core/errors.js'
 import { privateDirectory, readJson, writeJson } from './files.js'
 import { acquireLock } from './lock.js'
+import { AccountRequestGate, type RequestPolicy } from './request-gate.js'
 import { readdir, rm } from 'node:fs/promises'
 import { readCredential, saveCredential, normalizeCredential, type WebCredential } from './auth.js'
 
@@ -45,6 +46,7 @@ export interface ActiveOperation {
   rebase?: boolean
   repair?: { expectedKind?: 'tool' | 'final' | 'auto'; failure?: { stage: string; code: string }; mode?: 'arguments' | 'protocol'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; path: { id: number; parentId: number | null; hash: string }[] }
   verifiedPath?: { id: number; parentId: number | null; hash: string }[]
+  rateRejected?: boolean
   knownRejected?: boolean
   parentPath?: { id: number; parentId: number | null; hash: string }[]
 }
@@ -119,6 +121,7 @@ function validOperation(v: unknown): boolean {
     && (v.native === undefined || (record(v.native) && v.native.sessionId === v.sessionId && integer(v.native.turn) && integer(v.native.step)
       && integer(v.native.afterSeq) && (v.native.settlementSeq === undefined || integer(v.native.settlementSeq))
       && (v.native.abandoned === undefined || typeof v.native.abandoned === 'boolean') && text(v.native.attemptId) && text(v.native.instance)))
+    && (v.rateRejected === undefined || typeof v.rateRejected === 'boolean')
     && path(v.verifiedPath) && path(v.parentPath) && repair(v.repair, v.chatId)
     && budget(v.budget) && (v.usage === undefined || integer(v.usage))
     && (v.kind === undefined ? v.compaction === undefined : v.kind === 'compaction' && anchor(v.compaction)
@@ -129,7 +132,8 @@ function validOperation(v: unknown): boolean {
 
 /** Account metadata is shared; each session owns its confirmed association and active operation. */
 export class LocalStore {
-  constructor(readonly home: string) {}
+  constructor(readonly home: string, private readonly requestPolicy?: RequestPolicy) {}
+  requestGate(accountKey: string) { return new AccountRequestGate(this.home, accountKey, this.requestPolicy) }
   private async prepare() {
     await privateDirectory(this.home)
     await privateDirectory(join(this.home, 'locks'))

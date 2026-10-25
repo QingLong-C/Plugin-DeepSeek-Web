@@ -103,7 +103,7 @@ test('plugin registers and unloads with no listening server', async () => {
   } finally { await ctx.fiber.dispose(); await rm(home, { recursive: true, force: true }) }
 })
 
-test('independent temporary calls overlap; cancelling one never cancels another', async () => {
+test('temporary calls share the account queue; cancelling a waiting call sends nothing', async () => {
   const f = await setup(home => new LocalDiagnostics(home, false)), adapter = adapterFor(f)
   const started = [], finish = new Map()
   f.web.completion = async ({ ready, text, body }, options) => {
@@ -121,11 +121,12 @@ test('independent temporary calls overlap; cancelling one never cancels another'
     await waitStarted(1)
     const second = collect(adapter.stream({ ...base(), signal: cancelled.signal }))
     const rejected = assert.rejects(second, error => error.code === 'ABORTED')
-    await waitStarted(2)
+    await new Promise(r => setTimeout(r, 40))
+    assert.equal(started.length, 1)
     cancelled.abort(); await rejected
-    assert.equal(f.web.generations.length, 2)
+    assert.equal(f.web.generations.length, 1)
     finish.get(started[0])(); await first
-    assert.equal(f.web.stops.every(x => x.body.chat_session_id === started[1]), true)
+    assert.equal(f.web.stops.length, 0)
     await f.log.flush()
     const failures = (await readFile(f.log.file, 'utf8')).trim().split('\n').map(JSON.parse).filter(x => x.event === 'model.failed')
     assert.equal(failures.at(-1).code, 'ABORTED')
@@ -209,4 +210,14 @@ test('missing Web credential never uses an existing paid API key', async () => {
     oldApi === undefined ? delete process.env.DEEPSEEK_API_KEY : process.env.DEEPSEEK_API_KEY = oldApi
     adapter.dispose(); await f.close()
   }
+})
+
+test('account wait is cancellable and does not consume the subsequent generation timeout',async()=>{
+ const f=await setup(),adapter=new TokenFreeAdapter({timeoutMs:1000},{store:f.store,credential:async()=>({token:'fixture',accountId:'fixture-owner'}),client:()=>f.web.client()})
+ const lease=await f.store.requestGate(f.accountKey).enter(AbortSignal.timeout(4000))
+ try{
+  const result=collect(adapter.stream(base()))
+  await new Promise(r=>setTimeout(r,1150));assert.equal(f.web.generations.length,0)
+  await lease.release();const chunks=await result;assert.equal(chunks.at(-1).type,'finish');assert.equal(f.web.generations.length,1)
+ }finally{await lease.release();await adapter.dispose();await f.close()}
 })

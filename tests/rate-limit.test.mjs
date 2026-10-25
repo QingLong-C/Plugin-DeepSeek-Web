@@ -75,3 +75,11 @@ test('unknown clear_response stays an unexplained withdrawal instead of guessing
   try { await assert.rejects(() => f.run(), e => e.code === 'CONTENT_RETRACTED' && /未提供具体原因/.test(e.message)); assert.equal(f.web.generations.length, 1) }
   finally { await f.close() }
 })
+
+test('HTTP 429 preserves valid Retry-After for shared admission and never turns a transport failure into non-acceptance',async()=>{
+ const f=await setup();try{
+  f.web.completion=()=>new Response('',{status:429,headers:{'Retry-After':'120'}})
+  await assert.rejects(f.run(),e=>e.code==='RATE_LIMIT'&&e.details.accepted===false&&e.details.retryAfterMs===120000)
+  const state=JSON.parse(await readFile(join(f.home,'requests',f.accountKey+'.json'),'utf8'));assert.equal(state.strikes,1);assert(state.until>Date.now()+119000)
+ }finally{await f.close()}
+})

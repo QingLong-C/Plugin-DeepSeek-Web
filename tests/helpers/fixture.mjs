@@ -85,7 +85,7 @@ export class NativeFixture {
 }
 export async function setup(logFactory) {
   const home = await mkdtemp(join(tmpdir(), 'tokenfree-chain-'))
-  const store = new LocalStore(home), native = new NativeFixture(), web = new WebFixture()
+  const store = new LocalStore(home, { intervalMs: 0, cooldownMs: 5, maxCooldownMs: 20 }), native = new NativeFixture(), web = new WebFixture()
   const log = logFactory?.(home)
   const engine = new SessionEngine({ store, storeId: 'fixture-store', native, log, maxPromptChars: 120000 })
   const accountKey = digest(['deepseek-web-account', 'fixture-owner'])

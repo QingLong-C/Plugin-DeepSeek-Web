@@ -1,6 +1,6 @@
 /** Provider-independent failure; only dsh/ maps this to the native LlmError. */
 export class TokenFreeError extends Error {
-  constructor(message: string, readonly code: string, readonly details?: { status?: number; accepted?: false }) {
+  constructor(message: string, readonly code: string, readonly details?: { status?: number; accepted?: false; retryAfterMs?: number }) {
     super(message)
     this.name = 'TokenFreeError'
   }

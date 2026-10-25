@@ -379,7 +379,7 @@ test('other provider manual compaction keeps the native summarizer and never ent
   } finally { await f.close() }
 })
 
-test('standard-preset A summary overlaps B generation; exact summary stop never cancels B or a replacement operation', { timeout: 20000 }, async () => {
+test('standard-preset A summary shares account queue with B; exact summary stop releases B without cancelling it', { timeout: 20000 }, async () => {
   const f = await harness({ auto: false, count: 200, preset: true })
   let summary
   try {
@@ -403,11 +403,12 @@ test('standard-preset A summary overlaps B generation; exact summary stop never 
     assert.equal(f.web.stops.length, 0)
     const b = await f.create('parallel-B')
     b.followup(createUserMessage({ content: [{ type: 'text', text: 'B finishes while A summarizes' }], source: { kind: 'user' } }))
+    await new Promise(r => setTimeout(r, 40))
+    assert.equal(b.session.snapshotEvents().some(x => x.type === 'assistant/message'), false)
+    assert.equal((await f.adapter.operationStatus(f.agent.id)).operationId, pending.operationId)
+    await f.adapter.cancelSummary(f.agent.id, pending.operationId, pending.compactionId); await rejected
     await b.whenIdle(); await f.adapter.reconcile(b.id)
     assert.ok(b.session.snapshotEvents().some(x => x.type === 'assistant/message'))
-    assert.equal((await f.adapter.operationStatus(f.agent.id)).operationId, pending.operationId)
-    assert.equal((await f.adapter.usage(b.id)).count, 73)
-    await f.adapter.cancelSummary(f.agent.id, pending.operationId, pending.compactionId); await rejected
     assert.equal(f.agent.session.snapshotEvents().some(x => x.type === 'compaction/summary'), false)
     assert.equal(f.web.stops.length, 1)
     assert.equal(f.web.stops[0].body.chat_session_id, 'chat-1')

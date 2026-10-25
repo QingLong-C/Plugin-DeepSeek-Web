@@ -7,6 +7,8 @@ import { failureCategory } from '../local/diagnostics.js'
 import type { LocalDiagnostics } from '../local/diagnostics.js'
 import type { WebEvent, WebIdentity, WebMessage, WebTransport, WebSettings } from '../core/types.js'
 
+import { retryAfterMs } from '../local/request-gate.js'
+
 const ORIGIN = 'https://chat.deepseek.com'
 export type Fetch = typeof fetch
 export interface ClientDependencies {
@@ -16,10 +18,10 @@ export interface ClientDependencies {
   operationId?: string
   headers?: Record<string, string>
 }
-function httpError(status: number): LlmError {
+function httpError(status: number, retryAfter?: number): LlmError {
   // A generic 403 may be a WAF/challenge, not proof the account needs another login.
   const code = status === 401 ? 'AUTH' : status === 429 ? 'RATE_LIMIT' : status === 402 ? 'QUOTA' : status === 403 ? 'WEB_CHALLENGE' : 'WEB_HTTP'
-  return new LlmError(`DeepSeek Web request failed (HTTP ${status}).`, code, { status })
+  return new LlmError(`DeepSeek Web request failed (HTTP ${status}).`, code, { status, ...(status === 429 && retryAfter !== undefined ? { retryAfterMs: retryAfter } : {}) })
 }
 export function webMessage(value: unknown): WebMessage {
   if (!record(value) || !Number.isSafeInteger(value.message_id) || Number(value.message_id) < 0
@@ -65,7 +67,7 @@ export class DeepSeekWebClient implements WebTransport {
     this.dependencies.diagnostics?.write('http.completed', { ...meta, elapsedMs: Date.now() - startedAt, httpStatus: response.status })
     if (!response.ok) {
       await response.body?.cancel()
-      const error = httpError(response.status)
+      const error = httpError(response.status, retryAfterMs(response.headers.get('retry-after')))
       if (['/api/v0/chat_session/create', '/api/v0/chat/completion', '/api/v0/chat/edit_message'].includes(path) && [401, 402, 429].includes(response.status)) {
         throw new LlmError(error.message, error.code, { ...error.details, accepted: false })
       }

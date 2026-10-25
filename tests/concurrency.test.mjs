@@ -40,24 +40,26 @@ function controlled(web) {
   return streams
 }
 
-test('same engine runs distinct sessions concurrently and preserves tools, usage, parent chains and deltas', { timeout: 15000 }, async () => {
+test('same account queues distinct sessions while preserving tools, usage, parent chains and deltas', { timeout: 15000 }, async () => {
   const f = await setup(), streams = controlled(f.web)
   f.web.answer = p => ({ protocol_version: 1, request_id: p.request_id, kind: 'final', text: p.messages.at(-1).content[0].text })
   let a, b, aDone = false
   try {
     const ia = input([user('alpha-only')], 'A', [{ ...tool, name: 'alpha_tool' }])
     const ib = input([user('beta-only')], 'B', [{ ...tool, name: 'beta_tool' }])
-    a = f.run(ia).then(x => { aDone = true; return x }); b = f.run(ib)
-    await waitFor(async () => (await f.pending('A'))?.stage === 'receiving' && (await f.pending('B'))?.stage === 'receiving')
-    assert.equal(f.web.chats.size, 2)
-    const pa = await f.pending('A'), pb = await f.pending('B')
-    streams.get(pb.chatId)(); const rb = result(await b)
-    assert.equal(aDone, false, 'B must complete while A remains in progress')
-    const savedB = f.native.save(rb); await f.engine.reconcile('B')
-    assert.equal((await f.engine.usage('B')).count, rb.operation.usage)
-    assert.equal((await f.engine.usage('A')).count, undefined)
+    a = f.run(ia).then(x => { aDone = true; return x }); await waitFor(async () => (await f.pending('A'))?.stage === 'receiving'); b = f.run(ib)
+    await new Promise(r => setTimeout(r, 40))
+    assert.equal(await f.pending('B'), undefined, 'queued account request must not create or submit a chat')
+    assert.equal(f.web.chats.size, 1)
+    const pa = await f.pending('A')
     streams.get(pa.chatId)(); const ra = result(await a)
     const savedA = f.native.save(ra); await f.engine.reconcile('A')
+    await waitFor(async () => (await f.pending('B'))?.stage === 'receiving')
+    const pb = await f.pending('B')
+    assert.equal(aDone, true)
+    streams.get(pb.chatId)(); const rb = result(await b)
+    const savedB = f.native.save(rb); await f.engine.reconcile('B')
+    assert.equal((await f.engine.usage('B')).count, rb.operation.usage)
     assert.notEqual(pa.chatId, pb.chatId)
     assert.notEqual(pa.id, pb.id)
     assert.equal(ra.blocks[0].text, 'alpha-only'); assert.equal(rb.blocks[0].text, 'beta-only')
@@ -83,10 +85,13 @@ test('cancelling A stops only its response while B completes and commits', { tim
   try {
     a = f.run(input(undefined, 'A'), cancel.signal)
     const rejected = assert.rejects(a)
+    await waitFor(async () => (await f.pending('A'))?.stage === 'receiving')
     b = f.run(input(undefined, 'B'))
-    await waitFor(async () => (await f.pending('A'))?.stage === 'receiving' && (await f.pending('B'))?.stage === 'receiving')
-    const pa = await f.pending('A'), pb = await f.pending('B')
+    const pa = await f.pending('A')
+    assert.equal(await f.pending('B'), undefined)
     cancel.abort(); await rejected
+    await waitFor(async () => (await f.pending('B'))?.stage === 'receiving')
+    const pb = await f.pending('B')
     assert.deepEqual(f.web.stops.map(x => x.body.chat_session_id), [pa.chatId])
     assert.equal((await f.pending('B')).stage, 'receiving')
     streams.get(pb.chatId)(); const rb = result(await b); f.native.save(rb); await f.engine.reconcile('B')
@@ -230,23 +235,26 @@ test('revocation cancels all captured account generations but host disposal only
     let a, b
     try {
       a = collect(one.stream(opts)); const aRejected = assert.rejects(a, e => e.code === 'ABORTED')
+      await waitFor(() => f.web.generations.length === 1)
       b = collect(two.stream(opts)); const bResult = action === 'revoke' ? assert.rejects(b, e => e.code === 'ABORTED') : b
-      await waitFor(() => f.web.generations.length === 2)
+      await new Promise(r => setTimeout(r, 40))
+      assert.equal(f.web.generations.length, 1)
       if (action === 'dispose') {
         await one.dispose(); await aRejected
         assert.equal((await f.store.credential(file)).token, 'fixture')
+        await waitFor(() => f.web.generations.length === 2)
         streams.get(f.web.generations.find(g => payload(g.prompt).request_id === twoId).chat_session_id)(); assert.equal((await bResult).at(-1).type, 'finish')
         assert.equal(f.web.stops.length, 1)
       } else {
         await f.store.revoke(); await Promise.all([aRejected, bResult])
-        assert.equal(f.web.stops.length, 2)
-        assert.equal(new Set(f.web.stops.map(x => x.body.chat_session_id)).size, 2)
+        assert.equal(f.web.stops.length, 1, 'queued revoked request never submits')
+        assert.equal(f.web.generations.length, 1)
       }
     } finally { for (const finish of streams.values()) finish(); await Promise.allSettled([a, b]); await one.dispose(); await two.dispose(); await f.close() }
   }
 })
 
-test('A resumes its original response while another storage with the same sessionId completes independently', { timeout: 15000 }, async () => {
+test('A resumes its original response while another storage with the same sessionId queues independently', { timeout: 15000 }, async () => {
   const f = await setup()
   let releaseResume, a
   try {
@@ -258,13 +266,14 @@ test('A resumes its original response while another storage with the same sessio
       return Response.json({ code: 0, data: { biz_code: 22, biz_data: message } })
     }
     a = f.run(input(undefined, 'same-id')); await waitFor(() => releaseResume)
-    const peer = new SessionEngine({ store: new LocalStore(f.home), storeId: 'different-storage', native: f.native, maxPromptChars: 120000 })
+    const peer = new SessionEngine({ store: f.store, storeId: 'different-storage', native: f.native, maxPromptChars: 120000 })
     f.native.begin('same-id')
-    const rb = result(await collect(peer.run(input([user('different storage')], 'same-id'), f.accountKey, f.web.client(), AbortSignal.timeout(2000), (text, id) => decodeResponse(text, [], id))))
-    f.native.save(rb); await peer.reconcile('same-id')
-    assert.notEqual(peer.key('same-id'), f.engine.key('same-id'))
-    assert.ok(await f.pending('same-id'))
+    const peerResult = collect(peer.run(input([user('different storage')], 'same-id'), f.accountKey, f.web.client(), AbortSignal.timeout(2000), (text, id) => decodeResponse(text, [], id)))
+    await new Promise(r => setTimeout(r, 40)); assert.equal(f.web.generations.length, 1)
     releaseResume(); const ra = result(await a); f.native.save(ra); await f.engine.reconcile('same-id')
+    const rb = result(await peerResult); f.native.save(rb); await peer.reconcile('same-id')
+    assert.notEqual(peer.key('same-id'), f.engine.key('same-id'))
+    assert.equal(await f.pending('same-id'), undefined)
     assert.equal(f.web.generations.length, 2); assert.equal(f.web.resumes.length, 1)
     assert.equal(f.web.resumes[0].chat_session_id, 'chat-1')
     assert.equal((await peer.inspect('same-id')).session.chatId, 'chat-2')

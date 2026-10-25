@@ -1,3 +1,5 @@
+import { loggedRateRejection } from '../local/rate-rejection.js'
+import type { RequestLease } from '../local/request-gate.js'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { TokenFreeError, record } from './errors.js'
@@ -95,7 +97,8 @@ export class SessionEngine {
         this.dependencies.log?.write('stream.stop-request-failed', { operationId: operation.id,
           code: error instanceof TokenFreeError ? error.code : 'TRANSPORT' })
       }
-      for (;;) {
+      for (let observation = 0; observation < 3; observation++) {
+        if (observation) await delay(500 * 2 ** (observation - 1), undefined, { signal: cleanup })
         try {
           const messages = await client.history(operation.chatId!, cleanup)
           const response = this.verify(operation, messages)
@@ -108,8 +111,8 @@ export class SessionEngine {
             code: error instanceof TokenFreeError ? error.code : 'TRANSPORT' })
           if (cleanup.aborted || error instanceof TokenFreeError && ['AUTH', 'WEB_CHALLENGE', 'RATE_LIMIT', 'QUOTA'].includes(error.code)) throw error
         }
-        await delay(100, undefined, { signal: cleanup })
       }
+      await this.update(operation, { stage: 'uncertain' })
     } catch {
       await this.update(operation, { stage: 'uncertain' })
       this.dependencies.log?.write('operation.pending', { operationId: operation.id, code: 'PENDING_OPERATION',
@@ -260,13 +263,28 @@ export class SessionEngine {
       return await this.verifyOperation(accountKey, client, signal, key, requestStop)
     } finally { await release() }
   }
+  private async settleRateRejection(operation: ActiveOperation, client: WebTransport, signal: AbortSignal): Promise<boolean> {
+    if (!operation.identity || operation.repair || operation.expected?.length) return false
+    if (!operation.rateRejected) {
+      const saved = operation.native && await this.dependencies.native?.inspect(operation.native)
+      if (!saved?.interrupted || saved.message || !(await loggedRateRejection(this.store.home, operation))) return false
+    }
+    const messages = await client.history(operation.chatId!, signal)
+    if (messages.some(m => m.id === operation.identity!.requestId || m.id === operation.identity!.responseId
+      || m.role === 'USER' && m.parentId === operation.parentId && digest(m.content) === operation.promptHash)) return false
+    if (operation.parentId !== null && (!operation.parentPath
+      || canonical(pathOf(messages, operation.parentId)) !== canonical(operation.parentPath))) return false
+    await this.rejectUnsubmitted(operation)
+    return true
+  }
   private async verifyOperation(accountKey: string, client: WebTransport, signal: AbortSignal, key: string, requestStop = false): Promise<boolean> {
       if (await this.settle(await this.store.pending(key))) return true
       const pending = await this.store.pending(key)
       if (!pending) return true
       if (pending.accountKey !== accountKey || pending.storeId !== this.dependencies.storeId) throw new TokenFreeError('Another account/store owns the pending operation.', 'PENDING_OPERATION')
       client.bindOperation?.(pending.id)
-      if (pending.stage === 'prepared') await this.rejectUnsubmitted(pending)
+      if (await this.settleRateRejection(pending, client, signal)) { /* explicit rejection and unchanged official history */ }
+      else if (pending.stage === 'prepared') await this.rejectUnsubmitted(pending)
       else if (!pending.verifiedPath && !pending.knownRejected) {
         if (!pending.identity) await this.discover(pending, client, signal)
         if (requestStop || pending.stopRequested || pending.epoch !== (await this.store.account()).epoch) await this.stop(pending, client)
@@ -296,16 +314,25 @@ export class SessionEngine {
       await this.store.commit(op.sessionKey, op.id, { ...session, needsRebase: true })
     } finally { await release() }
   }
-  async *run(input: ModelInput, accountKey: string, client: WebTransport, signal: AbortSignal, validate: (text: string, id: string) => Block[], id = randomUUID(), summary?: CompactionAnchor, expectedEpoch?: number): AsyncIterable<ModelEvent> {
+  async *run(input: ModelInput, accountKey: string, client: WebTransport, signal: AbortSignal, validate: (text: string, id: string) => Block[], id = randomUUID(), summary?: CompactionAnchor, expectedEpoch?: number, timeoutMs?: number): AsyncIterable<ModelEvent> {
     const sessionKey = input.sessionId ? this.key(input.sessionId) : digest(['temporary', id])
     const release = await this.store.sessionLock(sessionKey, signal)
     let operation: ActiveOperation | undefined
     let raw = '', reasoning = '', shown = '', shownReasoning = '', decoder: FinalDecoder | undefined, revision = false, withdrawn = false
+    let lease: RequestLease | undefined
+    let budgetSignal: AbortSignal | undefined
     let monitoring: ReturnType<typeof setInterval> | undefined
     const revoked = new AbortController()
     signal = AbortSignal.any([signal, revoked.signal])
     try {
       let account = await this.store.account()
+      const queueEpoch = account.epoch
+      monitoring = setInterval(() => { void this.store.account().then(state => { if (state.epoch !== queueEpoch) revoked.abort() }).catch(() => revoked.abort()) }, 250)
+      monitoring.unref()
+      this.dependencies.log?.write('model.queued', { operationId: id, stage: 'account-admission' })
+      lease = await this.store.requestGate(accountKey).enter(signal)
+      if (timeoutMs !== undefined) { budgetSignal = AbortSignal.timeout(timeoutMs); signal = AbortSignal.any([signal, budgetSignal]) }
+      if ((await this.store.account()).epoch !== queueEpoch) throw new TokenFreeError('Account changed while queued.', 'ABORTED')
       if (expectedEpoch !== undefined && expectedEpoch !== account.epoch) throw new TokenFreeError('Account changed before admission.', 'ABORTED')
       if (await this.store.pending(sessionKey)) {
         // Known Web terminal evidence can settle from native records without network. Otherwise inspect only the original response.
@@ -341,9 +368,7 @@ export class SessionEngine {
       if (summary) await this.store.amendSession(sessionKey, { compaction: { ...summary, phase: 'awaiting-checkpoint', operationId: id } }, id)
       this.dependencies.log?.content(id, 'dsh.request', { sessionId: input.sessionId, native, compaction: operation.compaction, policy: input.policy, executionTools: input.executionTools, inputHashes: hashes, toolsHash, instructionsHash: instructionHash,
         ...(!native ? { system: input.system, instructions: input.instructions, messages: input.messages, tools: input.tools } : {}) })
-      const epoch = operation.epoch
-      monitoring = setInterval(() => { void this.store.account().then(state => { if (state.epoch !== epoch) revoked.abort() }).catch(() => revoked.abort()) }, 250)
-      monitoring.unref()
+
       if (!operation.chatId) {
         await this.update(operation, { stage: 'creating' })
         const chatId = await client.create(signal)
@@ -356,7 +381,8 @@ export class SessionEngine {
         signal.throwIfAborted()
         decoder = new FinalDecoder(id)
         raw = ''; reasoning = ''; revision = false
-        await this.update(operation, { stage: 'sending' })
+        await lease.submission(signal)
+        await this.update(operation, { stage: 'sending', rateRejected: false })
         let resumes = 0
         let source = summary ? client.editRoot!(operation.chatId!, operation.compaction!.rootId, nextPrompt, input.thinking, signal)
           : client.generate(operation.chatId!, operation.parentId, nextPrompt, input.thinking && repairAttempt === 0, signal)
@@ -364,7 +390,14 @@ export class SessionEngine {
           try {
             for await (const event of source) {
               signal.throwIfAborted()
-              if (event.type === 'event') { this.dependencies.log?.content(id, 'web.event', { name: event.name, data: event.data, resume: resumes, step: repairAttempt }); continue }
+              if (event.type === 'event') {
+                this.dependencies.log?.content(id, 'web.event', { name: event.name, data: event.data, resume: resumes, step: repairAttempt })
+                if (event.name === 'hint' && record(event.data) && event.data.type === 'error' && event.data.clear_response === true
+                  && event.data.finish_reason === 'rate_limit_reached' && !raw && !reasoning && !shown && !shownReasoning && !resumes && !repairAttempt) {
+                  await this.update(operation, { rateRejected: true })
+                }
+                continue
+              }
               if (event.type === 'ready') {
                 if (event.identity.chatId !== operation.chatId) throw new TokenFreeError('Ready belongs to another chat.', 'WEB_IDENTITY')
                 await this.update(operation, { identity: event.identity, stage: 'receiving' }); continue
@@ -435,15 +468,19 @@ export class SessionEngine {
         await this.update(operation, { stage: 'awaiting-native', expected: blocks, responseText: raw, reasoning, rebase: operation.rebase })
         this.dependencies.log?.content(id, 'validation', { passed: true, identity: operation.identity, blocks })
         if (!native && !summary) await this.store.commit(operation.sessionKey, id)
+        await lease.succeeded()
         yield { type: 'result', blocks, operation }
         return
       }
     } catch (error) {
+      const generationTimedOut = budgetSignal?.aborted
+      await lease?.failed(error)
       if (operation) {
         this.dependencies.log?.content(operation.id, 'preview', { text: withdrawn || error instanceof TokenFreeError && error.code === 'CONTENT_RETRACTED' ? '' : shown, reasoning: shownReasoning, failed: true })
         if ((error instanceof TokenFreeError && error.details?.accepted === false) || (operation.repair && operation.stage === 'prepared')) {
           await this.rejectUnsubmitted(operation)
         }
+        else if (operation.rateRejected && await this.settleRateRejection(operation, client, AbortSignal.timeout(5000)).catch(() => false)) { /* no accepted response exists */ }
         else if (operation.verifiedPath) await this.update(operation, { stage: signal.aborted ? 'stopped' : 'failed', rebase: true, responseText: raw, reasoning })
         else if (operation.chatId && operation.stage !== 'prepared') await this.stop(operation, client)
         else if (operation.stage === 'prepared') await this.update(operation, { stage: 'failed', knownRejected: true })
@@ -451,12 +488,13 @@ export class SessionEngine {
         if (!operation.native && !operation.kind && (operation.verifiedPath || operation.knownRejected)) await this.store.commit(operation.sessionKey, operation.id)
       }
       if (revoked.signal.aborted) throw new TokenFreeError('Account was revoked during generation.', 'ABORTED')
+      if (generationTimedOut && !(error instanceof TokenFreeError)) throw new TokenFreeError('DeepSeek 网页请求超时；未重复提交。', 'TIMEOUT')
       throw error
     } finally {
       if (monitoring) clearInterval(monitoring)
       // for-await cancellation calls return(), not catch(). The server still needs its own stop/confirmation.
       if (operation && !operation.verifiedPath && !operation.knownRejected && ['sending', 'receiving'].includes(operation.stage)) await this.stop(operation, client)
-      await release()
+      try { await lease?.release() } finally { await release() }
     }
   }
 }

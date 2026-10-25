@@ -132,7 +132,7 @@ export class TokenFreeAdapter extends LlmAdapter {
     const credential = await (this.dependencies.credential?.(signal) ?? resolveCredential(this.config.credentialFile))
     if (!credential.accountId) {
       if (this.dependencies.client) throw new TokenFreeError('Credentials need an explicit identity.', 'ACCOUNT_ID_UNKNOWN')
-      await new DeepSeekWebClient(credential).check(signal)
+      await new DeepSeekWebClient(credential).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
     }
     const client = this.dependencies.client?.(credential, { diagnostics: this.dependencies.diagnostics, operationId })
       ?? new DeepSeekWebClient(credential, { diagnostics: this.dependencies.diagnostics, headers: attributionHeaders() })
@@ -148,17 +148,22 @@ export class TokenFreeAdapter extends LlmAdapter {
   async usage(sessionId: string) { return (await this.engine()).usage(sessionId) }
   async refreshMetrics(sessionId: string, thinking: boolean, signal: AbortSignal, messages?: readonly unknown[]) {
     const accountSignal = this.dependencies.signal?.()
-    signal = AbortSignal.any([signal, this.lifetime.signal, AbortSignal.timeout(this.timeoutMs), ...(accountSignal ? [accountSignal] : [])])
+    signal = AbortSignal.any([signal, this.lifetime.signal, ...(accountSignal ? [accountSignal] : [])])
     const credential = await (this.dependencies.credential?.(signal) ?? resolveCredential(this.config.credentialFile))
     this.dependencies.diagnostics?.protect(credential)
     if (!credential.accountId) {
       if (this.dependencies.client) throw new TokenFreeError('Injected credentials require an explicit account identity.', 'ACCOUNT_ID_UNKNOWN')
-      await new DeepSeekWebClient(credential).check(signal)
+      await new DeepSeekWebClient(credential).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
     }
     const client = this.dependencies.client?.(credential, { diagnostics: this.dependencies.diagnostics, operationId: randomUUID() })
       ?? new DeepSeekWebClient(credential, { diagnostics: this.dependencies.diagnostics, headers: attributionHeaders() })
-    return (await this.engine()).refreshMetrics(sessionId, digest(['deepseek-web-account', credential.accountId]), client, thinking, signal,
-      messages ? modelInput({ messages }).messages.map(messageHash) : undefined, credential.epoch)
+    const accountKey = digest(['deepseek-web-account', credential.accountId])
+    const lease = await this.store.requestGate(accountKey).enter(signal)
+    try {
+      return await (await this.engine()).refreshMetrics(sessionId, accountKey, client, thinking, AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]),
+        messages ? modelInput({ messages }).messages.map(messageHash) : undefined, credential.epoch)
+    } catch (error) { await lease.failed(error); throw error }
+    finally { await lease.release() }
   }
   async withCompaction<T>(anchor: CompactionAnchor, operation: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
     if (this.summaries.has(anchor.sessionId)) throw new TokenFreeError('A native summary is already bound.', 'COMPACTION_PENDING')
@@ -174,7 +179,7 @@ export class TokenFreeAdapter extends LlmAdapter {
     const log = this.dependencies.diagnostics
     let credential: WebCredential | undefined
     const accountSignal = this.dependencies.signal?.()
-    const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(this.timeoutMs), ...(accountSignal ? [accountSignal] : []), ...(options.signal ? [options.signal] : [])])
+    const signal = AbortSignal.any([this.lifetime.signal, ...(accountSignal ? [accountSignal] : []), ...(options.signal ? [options.signal] : [])])
     try {
       if (options.provider !== PROVIDER || options.model !== MODEL) throw new TokenFreeError('Unknown TokenFree route.', 'MODEL_UNSUPPORTED')
       if (options.purpose && options.purpose !== 'compaction') throw new TokenFreeError('TokenFree keeps the native local title.', 'LOCAL_TITLE')
@@ -210,13 +215,13 @@ export class TokenFreeAdapter extends LlmAdapter {
       if (input.sessionId) await this.settling.get(input.sessionId)
       if (input.sessionId && !summary && !this.dependencies.native?.current(input.sessionId)) throw new TokenFreeError('Native request association is missing; no Web call was made.', 'NATIVE_CONTEXT')
       signal.throwIfAborted()
-      credential = await (this.dependencies.credential?.(signal) ?? resolveCredential(this.config.credentialFile))
+      credential = await (this.dependencies.credential?.(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)])) ?? resolveCredential(this.config.credentialFile))
       credential.epoch ??= (await this.store.account()).epoch
       log?.protect(credential)
       if (!credential.accountId) {
         // Existing MVP credentials are upgraded by read-only official account verification, not by guessing from a token.
         if (this.dependencies.client) throw new TokenFreeError('Injected credentials require an explicit account identity.', 'ACCOUNT_ID_UNKNOWN')
-        await new DeepSeekWebClient(credential).check(signal)
+        await new DeepSeekWebClient(credential).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
       }
       const accountKey = digest(['deepseek-web-account', credential.accountId])
       const client = this.dependencies.client?.(credential, { diagnostics: log, operationId })
@@ -243,7 +248,7 @@ export class TokenFreeAdapter extends LlmAdapter {
         })
         if (input.sessionId && input.executionTools) this.dependencies.checkTools?.(input.sessionId, blocks, input.executionTools)
         return blocks
-      }, operationId, summary, credential.epoch)) {
+      }, operationId, summary, credential.epoch, this.timeoutMs)) {
         signal.throwIfAborted()
         const state = await this.store.account()
         if (state.epoch !== credential.epoch) throw new TokenFreeError('Account was revoked.', 'ABORTED')
