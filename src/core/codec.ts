@@ -155,9 +155,13 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
   const note = () => { changed = true }
   if (source.trimStart().startsWith('<｜｜DSML｜｜ calls>')) value = dsmlEnvelope(source, tools, id, note)
   else try {
-    value = toolJson(source, note, true, candidate => canonical(decodeValue(candidate, tools, id, validate, () => {})
-      .map(block => block.type === 'tool-call' ? { ...block, arguments: strictJson(block.arguments) } : block)))
+    value = toolJson(source, note, true, {
+      meaning: candidate => canonical(decodeValue(candidate, tools, id, validate, () => {})
+        .map(block => block.type === 'tool-call' ? { ...block, arguments: strictJson(block.arguments) } : block)),
+      terminal: error => error instanceof LlmError && error.code === 'WEB_IDENTITY',
+    })
   } catch (error) {
+    if (error instanceof LlmError && error.code === 'WEB_IDENTITY') throw error
     // Only fixed categories enter correction feedback; JSON.parse messages can
     // contain private command fragments and must not be copied into the prompt.
     const message = error instanceof Error ? error.message : ''

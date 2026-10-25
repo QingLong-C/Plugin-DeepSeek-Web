@@ -106,12 +106,13 @@ function jsonTokens(source: string): JsonToken[] {
 }
 
 type GrammarState = { index: number; stack: string; edits: [number, string][] }
+type JsonContract = { meaning: (value: unknown) => string; terminal: (error: unknown) => boolean }
 
 /** Shortest punctuation-only grammar repair. All equally cheap interpretations must agree.
  * No opening containers, keys, quotes or values are invented; work exhaustion rejects,
  * even when an earlier candidate looked usable. This is not constrained model decoding.
  */
-function grammarJson(tokens: JsonToken[], interpret?: (value: unknown) => string): unknown {
+function grammarJson(tokens: JsonToken[], contract?: JsonContract): unknown {
   if (!['{', '['].includes(tokens[0]?.raw ?? '')) throw new Error('Not a complete JSON container')
   const buckets: GrammarState[][] = Array.from({ length: 9 }, () => [])
   const seen = new Map<string, { cost: number; paths: Set<string> }>()
@@ -154,8 +155,11 @@ function grammarJson(tokens: JsonToken[], interpret?: (value: unknown) => string
         else if (firstSyntaxIdentity !== syntaxIdentity) multipleSyntax = true
         resultCost = cost
         let key: string
-        try { key = interpret ? interpret(parsed) : syntaxIdentity }
-        catch { continue } // The complete original contract may rule out a structurally possible interpretation.
+        try { key = contract ? contract.meaning(parsed) : syntaxIdentity }
+        catch (error) {
+          if (contract?.terminal(error)) throw error // Identity and other authoritative guards cannot become syntax retries.
+          continue // The complete original contract may rule out a structurally possible interpretation.
+        }
         if (identity !== undefined && identity !== key) throw new Error('Ambiguous JSON structure; model correction required')
         result = parsed; identity = key; resultCost = cost; continue
       }
@@ -190,7 +194,7 @@ function grammarJson(tokens: JsonToken[], interpret?: (value: unknown) => string
 }
 
 /** Recover lexical encoding then grammar, shared by envelopes, DSML arguments and corrections. */
-export function toolJson(text: string, recovered?: () => void, envelopeFraming = false, interpret?: (value: unknown) => string): unknown {
+export function toolJson(text: string, recovered?: () => void, envelopeFraming = false, contract?: JsonContract): unknown {
   try { return strictJson(text) } catch (error) {
     if (error instanceof Error && /Duplicate|nesting|number/.test(error.message)) throw error
   }
@@ -215,7 +219,7 @@ export function toolJson(text: string, recovered?: () => void, envelopeFraming =
   try { parsed = strictJson(normalized.map(t => t.raw).join(' ')) }
   catch (error) {
     if (error instanceof Error && /Duplicate|nesting|number/.test(error.message)) throw error
-    parsed = grammarJson(normalized, interpret)
+    parsed = grammarJson(normalized, contract)
   }
   recovered?.(); return parsed
 }

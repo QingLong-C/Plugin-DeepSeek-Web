@@ -43,6 +43,18 @@ test('ambiguous structure, duplicate keys, missing values and damaged strings ne
  assert.throws(()=>decodeResponse(bad,[tool],'op',(_,a)=>{assert.equal(typeof a.command,'string')}))
 })
 
+test('identity errors remain terminal even when syntax has multiple equivalent structural interpretations',async()=>{
+ const declared={name:'inspect',description:'Read only',parameters:{type:'object',properties:{description:{type:'string'},command:{type:'string'}}}}
+ const raw=id=>JSON.stringify({protocol_version:1,request_id:id,kind:'tool',calls:[{name:'inspect',arguments:{description:'first',command:'read only'}},{name:'inspect',arguments:{command:'second'}}]}).replace('}},{"name"','},{"name"')
+ assert.throws(()=>decodeResponse(raw('wrong'),[declared],'op'),e=>e.code==='WEB_IDENTITY')
+ const f=await setup(),a=new TokenFreeAdapter({}, {store:f.store,native:f.native,credential:async()=>({token:'fixture',accountId:'fixture-owner'}),client:(_,c)=>f.web.client(f.log,c.operationId)}),chunks=[]
+ f.web.answer=()=>raw('wrong')
+ try{
+  await assert.rejects(async()=>{for await(const c of a.stream({provider:PROVIDER,model:MODEL,messages:[{role:'user',content:[{type:'text',text:'Inspect only'}]}],tools:[declared]}))chunks.push(c)},e=>e.code==='WEB_IDENTITY')
+  assert.equal(f.web.generations.length,1);assert.equal(chunks.some(c=>c.block?.type==='tool-call'),false)
+ }finally{await a.dispose();await f.close()}
+})
+
 test('original schema resolves structural alternatives only when their validated meaning is unique',()=>{
  const args={nested:{value:1},end:true}
  const expected={protocol_version:1,request_id:'op',kind:'tool',calls:[{name:'inspect',arguments:args}]}
