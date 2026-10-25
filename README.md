@@ -69,17 +69,6 @@ pnpm check
 
 发布安装包遵循 [发布流程](RELEASING.md)，使用最终提交、新标签和冻结产物。不要将源码目录直接覆盖正在运行的 profile。
 
-## 版本规则
-
-| 变更 | 示例 |
-| --- | --- |
-| 当前数字版本基线 | v1.0.0 |
-| 修复与兼容补丁 | v1.0.1 |
-| 向后兼容的新功能 | v1.1.0 |
-| 不兼容的重大变化 | v2.0.0 |
-
-每版重点同时写入 [CHANGELOG](CHANGELOG.md) 与 GitHub Release。早期维护标签保留为历史，不改写公开包。
-
 ## 许可
 
 [MIT](LICENSE)。来源、原作者和第三方说明见 [NOTICE](NOTICE.md) 与 [第三方许可](THIRD_PARTY_NOTICES.md)。
