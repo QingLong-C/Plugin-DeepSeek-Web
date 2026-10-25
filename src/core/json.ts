@@ -60,73 +60,162 @@ export function unfence(text: string): string {
   return /^[ \t\r\n]*```(?:json|xml|dsml)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t\r\n]*$/i.exec(text)?.[1] ?? text
 }
 
-/** Recover punctuation and string encoding only; decoded keys and scalar values never change. */
-export function toolJson(text: string, recovered?: () => void, envelopeFraming = false): unknown {
-  try { return strictJson(text) } catch { /* Try one bounded local normalization. */ }
-  if (text.length > 2_621_440) throw new Error('Tool JSON exceeds recovery limit')
-  const source = unfence(text)
-  try {
-    const value = strictJson(source)
-    recovered?.(); return value
-  } catch { /* The candidate still needs punctuation normalization. */ }
-  const stack: string[] = [], removed = new Set<number>(), encoded = new Map<number, string>()
-  let quoted = false, escape = false, started = false, rootClose = '', extras = 0, framing = 0, encodingGrowth = 0
-  for (let i = 0; i < source.length; i++) {
+type JsonToken = { raw: string; kind: 'string' | 'scalar' | 'punctuation' }
+const MAX_JSON = 2_621_440
+
+/** Complete scalar tokens are immutable. Invalid escapes and truncated values are not repaired. */
+function jsonTokens(source: string): JsonToken[] {
+  const tokens: JsonToken[] = []
+  let growth = 0
+  for (let i = 0; i < source.length;) {
     const char = source[i]!
-    if (quoted) {
-      // A literal control code has one JSON encoding and the same decoded value.
-      // Do not reinterpret a backslash followed by a raw newline or another bad escape.
-      if (!escape && char.charCodeAt(0) < 32) {
-        const replacement = JSON.stringify(char).slice(1, -1)
-        encodingGrowth += replacement.length - 1
-        if (source.length + encodingGrowth > 2_621_440) throw new Error('Normalized tool JSON exceeds recovery limit')
-        encoded.set(i, replacement)
+    if (/[ \t\r\n]/.test(char)) { i++; continue }
+    if (tokens.length >= 8192) throw new Error('JSON grammar token budget exceeded')
+    if ('{}[],:'.includes(char)) { tokens.push({ raw: char, kind: 'punctuation' }); i++; continue }
+    if (char === '"') {
+      const start = i++
+      const parts: string[] = []
+      let cursor = start, escape = false, closed = false
+      for (; i < source.length; i++) {
+        const c = source[i]!
+        if (!escape && c.charCodeAt(0) < 32) {
+          const encoded = JSON.stringify(c).slice(1, -1)
+          parts.push(source.slice(cursor, i), encoded); cursor = i + 1
+          growth += encoded.length - 1
+          if (source.length + growth > MAX_JSON) throw new Error('Normalized tool JSON exceeds recovery limit')
+        }
+        if (!escape && c === '"') { i++; closed = true; break }
+        if (!escape && c === '\\') escape = true
+        else escape = false
       }
-      if (!escape && char === '"') quoted = false
-      if (!escape && char === '\\') escape = true
-      else escape = false
-      continue
+      if (!closed) throw new Error('Unterminated JSON string')
+      parts.push(source.slice(cursor, i))
+      const raw = parts.join('')
+      JSON.parse(raw) // Reject bad escapes, including backslash followed by a raw control code.
+      tokens.push({ raw, kind: 'string' }); continue
     }
-    if (/\s/.test(char)) continue
-    // Envelope-only transport punctuation outside a single root. Never search prose,
-    // strip XML tags, modify a JSON value, or apply this rule to argument strings.
-    if (envelopeFraming && (!started || !stack.length) && '<>()'.includes(char)) {
-      if (++framing > 8 || removed.size >= 32) throw new Error('Too much envelope framing')
-      removed.add(i); continue
-    }
-    if (!started) {
-      if (char !== '{' && char !== '[') throw new Error('Not a complete JSON container')
-      started = true; rootClose = char === '{' ? '}' : ']'
-    } else if (!stack.length) {
-      if (char !== rootClose || ++extras > 8) throw new Error('Extra JSON data')
-      removed.add(i)
-      if (removed.size > 32) throw new Error('Too many JSON syntax repairs')
-      continue
-    }
-    if (char === '"') { quoted = true; continue }
-    if (char === '{' || char === '[') {
-      if (stack.length >= 64) throw new Error('JSON nesting exceeded limit')
-      stack.push(char === '{' ? '}' : ']')
-    } else if (char === '}' || char === ']') {
-      if (stack.pop() !== char) throw new Error('Mismatched JSON delimiter')
-    } else if (char === ',') {
-      let next = i + 1
-      while (next < source.length && /\s/.test(source[next]!)) next++
-      if (source[next] === '}' || source[next] === ']') removed.add(i)
-    }
-    if (removed.size > 32) throw new Error('Too many JSON syntax repairs')
+    const start = i
+    while (i < source.length && !/[ \t\r\n{}\[\],:"]/.test(source[i]!)) i++
+    const raw = source.slice(start, i)
+    if (!/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$/.test(raw)) throw new Error('Invalid JSON scalar')
+    const value: unknown = JSON.parse(raw)
+    if (typeof value === 'number' && !Number.isFinite(value)) throw new Error('Invalid JSON number')
+    tokens.push({ raw, kind: 'scalar' })
   }
-  if (!started || quoted || stack.length > 8) throw new Error('Incomplete JSON value')
-  const pieces: string[] = []
-  let cursor = 0
-  for (const index of [...removed, ...encoded.keys()].sort((a, b) => a - b)) {
-    pieces.push(source.slice(cursor, index), encoded.get(index) ?? ''); cursor = index + 1
+  return tokens
+}
+
+type GrammarState = { index: number; stack: string; edits: [number, string][] }
+
+/** Shortest punctuation-only grammar repair. All equally cheap interpretations must agree.
+ * No opening containers, keys, quotes or values are invented; work exhaustion rejects,
+ * even when an earlier candidate looked usable. This is not constrained model decoding.
+ */
+function grammarJson(tokens: JsonToken[], interpret?: (value: unknown) => string): unknown {
+  if (!['{', '['].includes(tokens[0]?.raw ?? '')) throw new Error('Not a complete JSON container')
+  const buckets: GrammarState[][] = Array.from({ length: 9 }, () => [])
+  const seen = new Map<string, { cost: number; paths: Set<string> }>()
+  let work = 0, queued = 0, result: unknown, identity: string | undefined, resultCost = 9
+  let firstSyntax: unknown, firstSyntaxIdentity: string | undefined, multipleSyntax = false
+  const put = (state: GrammarState, cost: number) => {
+    if (cost > 8 || cost > resultCost || state.stack.length > 65) return
+    const key = `${state.index}/${state.stack}`, path = JSON.stringify(state.edits)
+    const previous = seen.get(key)
+    if (previous && previous.cost < cost) return
+    if (previous?.cost === cost) {
+      if (previous.paths.has(path)) return
+      if (previous.paths.size >= 16) throw new Error('JSON grammar ambiguity budget exceeded')
+      previous.paths.add(path)
+    } else seen.set(key, { cost, paths: new Set([path]) })
+    if (++queued > 65_536) throw new Error('JSON grammar state budget exceeded')
+    buckets[cost]!.push(state)
   }
-  pieces.push(source.slice(cursor), ...stack.reverse())
-  const candidate = pieces.join('')
-  if (candidate.length > 2_621_440) throw new Error('Normalized tool JSON exceeds recovery limit')
-  if (candidate === text) throw new Error('No supported JSON syntax repair')
-  const value = strictJson(candidate) // duplicate keys, missing values and invalid tokens still reject the whole batch
-  recovered?.()
-  return value
+  put({ index: 0, stack: 'v', edits: [] }, 0)
+  for (let cost = 0; cost <= 8 && cost <= resultCost; cost++) {
+    const bucket = buckets[cost]!
+    for (let n = 0; n < bucket.length; n++) {
+      if (++work > 65_536) throw new Error('JSON grammar work budget exceeded')
+      const s = bucket[n]!, token = tokens[s.index], raw = token?.raw, top = s.stack.at(-1)!
+      if (s.index === tokens.length && s.stack === 'd') {
+        const pieces: string[] = []
+        let edit = 0
+        for (let i = 0; i <= tokens.length; i++) {
+          let removed = false
+          while (s.edits[edit]?.[0] === i) {
+            const punctuation = s.edits[edit++]![1]
+            if (punctuation === '') removed = true
+            else pieces.push(punctuation)
+          }
+          if (i < tokens.length && !removed) pieces.push(tokens[i]!.raw)
+        }
+        const parsed = strictJson(pieces.join(' '))
+        const syntaxIdentity = JSON.stringify(parsed)
+        if (firstSyntaxIdentity === undefined) { firstSyntax = parsed; firstSyntaxIdentity = syntaxIdentity }
+        else if (firstSyntaxIdentity !== syntaxIdentity) multipleSyntax = true
+        resultCost = cost
+        let key: string
+        try { key = interpret ? interpret(parsed) : syntaxIdentity }
+        catch { continue } // The complete original contract may rule out a structurally possible interpretation.
+        if (identity !== undefined && identity !== key) throw new Error('Ambiguous JSON structure; model correction required')
+        result = parsed; identity = key; resultCost = cost; continue
+      }
+      const replace = (next: string) => s.stack.slice(0, -1) + next
+      const value = token && (token.kind !== 'punctuation' || raw === '{' || raw === '[')
+      let stack: string | undefined
+      if (top === 'v' || top === 'A' || top === 'a') {
+        if (value) {
+          stack = replace(s.stack.length === 1 ? 'd' : top === 'v' ? 'o' : 'r')
+          if (raw === '{' || raw === '[') stack += raw === '{' ? 'K' : 'A'
+        } else if (top === 'A' && raw === ']') stack = s.stack.slice(0, -1)
+      } else if ((top === 'K' || top === 'k') && token?.kind === 'string') stack = replace(':')
+      else if (top === 'K' && raw === '}') stack = s.stack.slice(0, -1)
+      else if (top === ':' && raw === ':') stack = replace('v')
+      else if ((top === 'o' && raw === '}') || (top === 'r' && raw === ']')) stack = s.stack.slice(0, -1)
+      else if ((top === 'o' || top === 'r') && raw === ',') stack = replace(top === 'o' ? 'k' : 'a')
+      if (stack !== undefined) put({ ...s, index: s.index + 1, stack }, cost)
+      const insert = (punctuation: string, next: string) => put({ index: s.index, stack: next, edits: [...s.edits, [s.index, punctuation]] }, cost + 1)
+      if (top === ':' && value) insert(':', replace('v'))
+      if ((top === 'o' && token?.kind === 'string') || (top === 'r' && value)) insert(',', replace(top === 'o' ? 'k' : 'a'))
+      if ((top === 'o' || top === 'r') && (raw === undefined || [',', '}', ']'].includes(raw))) insert(top === 'o' ? '}' : ']', s.stack.slice(0, -1))
+      // Only redundant copies of the root close are removable; internal delimiters
+      // and mismatched types may carry structure and cannot simply be discarded.
+      if (top === 'd' && raw === (tokens[0]!.raw === '{' ? '}' : ']')) put({ ...s, index: s.index + 1, edits: [...s.edits, [s.index, '']] }, cost + 1)
+    }
+  }
+  // A unique syntactic result must still reach the normal decoder, so its real
+  // identity/schema error retains its type and enters the existing recovery planner.
+  if (identity === undefined && firstSyntaxIdentity !== undefined && !multipleSyntax) return firstSyntax
+  if (identity === undefined) throw new Error('No unambiguous JSON grammar repair within budget')
+  return result
+}
+
+/** Recover lexical encoding then grammar, shared by envelopes, DSML arguments and corrections. */
+export function toolJson(text: string, recovered?: () => void, envelopeFraming = false, interpret?: (value: unknown) => string): unknown {
+  try { return strictJson(text) } catch (error) {
+    if (error instanceof Error && /Duplicate|nesting|number/.test(error.message)) throw error
+  }
+  if (text.length > MAX_JSON) throw new Error('Tool JSON exceeds recovery limit')
+  let source = unfence(text).trim()
+  if (envelopeFraming) {
+    let framing = 0
+    while (source && '<>()'.includes(source[0]!)) { source = source.slice(1).trimStart(); framing++ }
+    while (source && '<>()'.includes(source.at(-1)!)) { source = source.slice(0, -1).trimEnd(); framing++ }
+    if (framing > 8) throw new Error('Too much envelope framing')
+  }
+  const tokens = jsonTokens(source)
+  let commas = 0
+  const normalized = tokens.filter((token, i) => {
+    if (token.raw === ',' && ['}', ']'].includes(tokens[i + 1]?.raw ?? '')) {
+      if (++commas > 32) throw new Error('Too many JSON syntax repairs')
+      return false
+    }
+    return true
+  })
+  let parsed: unknown
+  try { parsed = strictJson(normalized.map(t => t.raw).join(' ')) }
+  catch (error) {
+    if (error instanceof Error && /Duplicate|nesting|number/.test(error.message)) throw error
+    parsed = grammarJson(normalized, interpret)
+  }
+  recovered?.(); return parsed
 }

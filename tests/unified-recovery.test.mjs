@@ -16,7 +16,7 @@ const mutations=p=>{
    {...v,calls:[null]},{...v,calls:[{}]},{...v,calls:[{name:tool.name}]},{...v,calls:[{name:'not_in_catalogue',arguments:{}}]},
    {...v,calls:[{...call,arguments:null}]},{...v,calls:[{...call,arguments:[]}]},{...v,calls:[{...call,arguments:'broken'}]},
    {...v,calls:[{...call,extra:true}]}].map(x=>JSON.stringify(x)),
-  s.replace('"kind":"tool"','"kind":"tool","kind":"tool"'),s.replace('"calls":','"calls" '),s.replace('"tool"','"to\\qol"'),
+  s.replace('"kind":"tool"','"kind":"tool","kind":"tool"'),s.replace('"calls":','"calls";'),s.replace('"tool"','"to\\qol"'),
   s.replace('"tool"','"to\\uXXXXol"'),s.replace('"tool"','"to\nol"'),s.slice(0,s.indexOf('"calls"')+7),
   '<｜｜DSML｜｜ calls><broken/>','<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="missing">',
   '<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name="read_marker"><｜｜DSML｜｜ parameter name="x" string="true">a</｜｜DSML｜｜ parameter><｜｜DSML｜｜ parameter name="x" string="true">b</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>',

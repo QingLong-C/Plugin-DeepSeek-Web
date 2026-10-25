@@ -154,7 +154,26 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
   let changed = source !== text
   const note = () => { changed = true }
   if (source.trimStart().startsWith('<｜｜DSML｜｜ calls>')) value = dsmlEnvelope(source, tools, id, note)
-  else try { value = toolJson(source, note, true) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', 'syntax') }
+  else try {
+    value = toolJson(source, note, true, candidate => canonical(decodeValue(candidate, tools, id, validate, () => {})
+      .map(block => block.type === 'tool-call' ? { ...block, arguments: strictJson(block.arguments) } : block)))
+  } catch (error) {
+    // Only fixed categories enter correction feedback; JSON.parse messages can
+    // contain private command fragments and must not be copied into the prompt.
+    const message = error instanceof Error ? error.message : ''
+    const reason = /budget|limit/i.test(message) ? 'Local grammar recovery budget exceeded'
+      : /ambiguous/i.test(message) ? 'Multiple possible structures remain after full contract validation'
+      : /Unterminated|Incomplete/i.test(message) ? 'A JSON string or value is incomplete'
+      : 'JSON syntax or scalar encoding is invalid'
+    throw new WebResponseFormatError(`${reason}; regenerate one complete response from the authoritative input and exact contract. No tools were executed.`, 'syntax')
+  }
+  const blocks = decodeValue(value, tools, id, validate, note)
+  if (changed) recovered?.()
+  return blocks
+}
+
+/** The same full contract adjudicates grammar candidates and final native delivery. */
+function decodeValue(value: unknown, tools: readonly Tool[], id: string | undefined, validate: ((tool: Tool, value: unknown) => void) | undefined, note: () => void): Block[] {
   if (!record(value)) throw new WebResponseFormatError('Invalid Web response object.', 'envelope')
   if (id && ((value.request_id !== undefined && value.request_id !== id) || (value.protocol_version !== undefined && value.protocol_version !== 1))) throw new LlmError('Response protocol identity changed.', 'WEB_IDENTITY')
   const allowed = value.kind === 'tool' ? ['protocol_version', 'request_id', 'kind', 'calls', 'text'] : ['protocol_version', 'request_id', 'kind', 'text']
@@ -195,7 +214,6 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
     }
   } else throw new WebResponseFormatError('Invalid final/tool envelope. No tools were executed.', 'envelope', value.kind === 'final' ? 'final' : value.kind === 'tool' ? 'tool' : undefined)
   if (id && (value.request_id === undefined || value.protocol_version === undefined)) throw new WebResponseFormatError('Missing response protocol wrapper.', 'wrapper', value.kind === 'final' ? 'final' : 'tool')
-  if (changed) recovered?.()
   return blocks
 }
 export function encodeFormatRepair(options: CodecOptions, rejected: string, maxChars: number, id: string = randomUUID()): string {
