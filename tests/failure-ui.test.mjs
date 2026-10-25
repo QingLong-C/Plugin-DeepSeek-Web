@@ -43,6 +43,8 @@ test('built client replaces only withdrawal rows, preserves native fallback and 
     assert.notEqual(winner().component, native, 'TokenFree should own the display wrapper')
     const props = (code, message) => ({ node: { kind: 'turn-error', data: { code, message, turn: 2, seq: 40 } }, t: key => key })
     for (const [code, message, heading] of [
+      ['RATE_LIMIT', 'DeepSeek 官网限流（rate_limit_reached）：消息发送过于频繁，请稍后重试。', '官网限流'],
+      ['RATE_LIMIT', 'DeepSeek Web request failed (HTTP 429).', '官网限流'],
       ['CONTENT_RETRACTED', 'Web response did not complete (CONTENT_FILTER).', '官网内容过滤'],
       ['CONTENT_RETRACTED', 'DeepSeek 官网内容过滤（CONTENT_FILTER）：本次回答已被官网拦截或撤回。', '官网内容过滤'],
       ['CONTENT_RETRACTED', 'Web response was withdrawn.', '官网撤回了回答'],
@@ -58,11 +60,16 @@ test('built client replaces only withdrawal rows, preserves native fallback and 
       assert.ok(ui.getByText(heading))
       assert.ok(ui.getByText(code))
       if (message.includes('已自动纠正一次')) assert.match(ui.container.textContent, code === 'WEB_TOOL_FORMAT' ? /已自动纠正一次，工具协议仍未通过校验/ : /已自动纠正一次，返回参数仍未通过规则/)
+      if (code === 'RATE_LIMIT') {
+        assert.match(ui.container.textContent, /稍后继续未完成步骤/)
+        assert.equal(ui.container.textContent.includes('撤回'), false)
+        assert.equal(ui.container.textContent.includes('内容过滤'), false)
+      }
       assert.equal(ui.container.textContent.includes('本轮运行失败'), false)
       if (heading !== '官网内容过滤') assert.equal(ui.container.textContent.includes('官网内容过滤'), false)
       cleanup()
     }
-    for (const [code, message] of [['AUTH', 'auth error'], ['TRANSPORT', 'CONTENT_FILTER mentioned by an unrelated error']]) {
+    for (const [code, message] of [['AUTH', 'auth error'], ['TRANSPORT', 'CONTENT_FILTER mentioned by an unrelated error'], ['RATE_LIMIT', 'Another provider rate limit']]) {
       const ui = render(React.createElement(winner().component, props(code, message)))
       assert.equal(ui.container.textContent, `NATIVE:${code}:${message}`)
       cleanup()

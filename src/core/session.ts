@@ -300,7 +300,7 @@ export class SessionEngine {
     const sessionKey = input.sessionId ? this.key(input.sessionId) : digest(['temporary', id])
     const release = await this.store.sessionLock(sessionKey, signal)
     let operation: ActiveOperation | undefined
-    let raw = '', reasoning = '', shown = '', shownReasoning = '', decoder: FinalDecoder | undefined, revision = false
+    let raw = '', reasoning = '', shown = '', shownReasoning = '', decoder: FinalDecoder | undefined, revision = false, withdrawn = false
     let monitoring: ReturnType<typeof setInterval> | undefined
     const revoked = new AbortController()
     signal = AbortSignal.any([signal, revoked.signal])
@@ -370,7 +370,12 @@ export class SessionEngine {
                 await this.update(operation, { identity: event.identity, stage: 'receiving' }); continue
               }
               const snapshot: WebSnapshot = event.snapshot
-              if (snapshot.cleared) { this.dependencies.log?.write('stream.withdrawn', { operationId: id }); yield { type: 'withdraw' }; throw new TokenFreeError('DeepSeek 官网撤回了回答：未提供具体原因。', 'CONTENT_RETRACTED') }
+              if (snapshot.cleared) {
+                withdrawn = true
+                this.dependencies.log?.write('stream.withdrawn', { operationId: id })
+                yield { type: 'withdraw' }
+                throw new TokenFreeError(snapshot.clearError?.message ?? 'DeepSeek 官网撤回了回答：未提供具体原因。', snapshot.clearError?.code ?? 'CONTENT_RETRACTED')
+              }
               if (snapshot.identity && operation.identity && canonical(snapshot.identity) !== canonical(operation.identity)) throw new TokenFreeError('Snapshot identity changed.', 'WEB_IDENTITY')
               if (snapshot.usage !== undefined && snapshot.usage !== operation.usage) await this.update(operation, { usage: snapshot.usage, usageSource: 'sse', usageObservedAt: new Date().toISOString() })
               if (!summary && !snapshot.text.startsWith(raw)) { revision = true; decoder = new FinalDecoder(id); decoder.append(snapshot.text); this.dependencies.log?.write('stream.revised', { operationId: id }) }
@@ -435,7 +440,7 @@ export class SessionEngine {
       }
     } catch (error) {
       if (operation) {
-        this.dependencies.log?.content(operation.id, 'preview', { text: error instanceof TokenFreeError && error.code === 'CONTENT_RETRACTED' ? '' : shown, reasoning: shownReasoning, failed: true })
+        this.dependencies.log?.content(operation.id, 'preview', { text: withdrawn || error instanceof TokenFreeError && error.code === 'CONTENT_RETRACTED' ? '' : shown, reasoning: shownReasoning, failed: true })
         if ((error instanceof TokenFreeError && error.details?.accepted === false) || (operation.repair && operation.stage === 'prepared')) {
           await this.rejectUnsubmitted(operation)
         }

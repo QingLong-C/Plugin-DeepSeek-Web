@@ -5,16 +5,17 @@ import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
 
 type Props = ChatNodeViewProps<'turn-error'>
 
-/** Explain TokenFree withdrawal/format errors; other rows retain their shipped renderer. */
+/** Explain TokenFree rate-limit/withdrawal/format errors; other rows retain their shipped renderer. */
 export function FailureNotice({ fallback: Fallback, ...props }: Props & { fallback: ComponentType<Props> }) {
   const { code, message } = props.node.data
-  if (!['CONTENT_RETRACTED', 'WEB_TOOL_FORMAT', 'INVALID_TOOL_CALL', 'OUTPUT_SCHEMA', 'OUTPUT_FORMAT', 'TOOL_CHOICE'].includes(code ?? '')) return <Fallback {...props} />
+  const limited = code === 'RATE_LIMIT' && /^DeepSeek (?:官网限流|Web request failed \(HTTP 429\))/.test(message)
+  if (!limited && !['CONTENT_RETRACTED', 'WEB_TOOL_FORMAT', 'INVALID_TOOL_CALL', 'OUTPUT_SCHEMA', 'OUTPUT_FORMAT', 'TOOL_CHOICE'].includes(code ?? '')) return <Fallback {...props} />
   // Older persisted errors already carry the explicit upstream status in their message.
   const filtered = /\bCONTENT_FILTER\b/.test(message)
   const schema = ['INVALID_TOOL_CALL', 'OUTPUT_SCHEMA', 'OUTPUT_FORMAT', 'TOOL_CHOICE'].includes(code ?? '')
   const format = code === 'WEB_TOOL_FORMAT'
-  const title = schema ? code === 'OUTPUT_SCHEMA' || code === 'OUTPUT_FORMAT' ? '回答格式不符合规则' : code === 'TOOL_CHOICE' ? '工具选择不符合规则' : '工具参数不符合规则' : format ? '工具参数格式错误' : filtered ? '官网内容过滤' : '官网撤回了回答'
-  const explanation = schema ? /已自动纠正一次/.test(message) ? '已自动纠正一次，返回参数仍未通过规则，本步骤未执行工具；之前的操作不会自动回滚。' : '返回结果未通过声明的格式规则，本步骤未执行工具；之前的操作不会自动回滚。' : format ? /已自动纠正一次/.test(message) ? '已自动纠正一次，工具协议仍未通过校验，本步骤未执行工具；之前的操作不会自动回滚。' : '未获得可执行的完整工具参数，本步骤未执行。可重试本步，之前的操作不会自动回滚。' : filtered
+  const title = limited ? '官网限流' : schema ? code === 'OUTPUT_SCHEMA' || code === 'OUTPUT_FORMAT' ? '回答格式不符合规则' : code === 'TOOL_CHOICE' ? '工具选择不符合规则' : '工具参数不符合规则' : format ? '工具参数格式错误' : filtered ? '官网内容过滤' : '官网撤回了回答'
+  const explanation = limited ? 'DeepSeek 官网暂时限制了请求频率或并发，请稍后继续未完成步骤；此前完成的操作不会自动回滚。' : schema ? /已自动纠正一次/.test(message) ? '已自动纠正一次，返回参数仍未通过规则，本步骤未执行工具；之前的操作不会自动回滚。' : '返回结果未通过声明的格式规则，本步骤未执行工具；之前的操作不会自动回滚。' : format ? /已自动纠正一次/.test(message) ? '已自动纠正一次，工具协议仍未通过校验，本步骤未执行工具；之前的操作不会自动回滚。' : '未获得可执行的完整工具参数，本步骤未执行。可重试本步，之前的操作不会自动回滚。' : filtered
     ? 'DeepSeek 官网拦截或撤回了本次回答。'
     : 'DeepSeek 官网撤回了本次回答，未提供具体原因。'
   return <div role="status" style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0', fontSize: 'var(--dsh-content-font-size-secondary, 13px)', overflowWrap: 'anywhere' }}>

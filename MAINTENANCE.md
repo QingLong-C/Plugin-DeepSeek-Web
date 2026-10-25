@@ -4,7 +4,7 @@
 
 本仓库独立维护，基于上游 `yuezengwu/dsh-tokenfree` 的 v0.2.0，提交 `6a57b2f9c512bacafe678868c08ef47bb7b484fe`。保留 MIT 许可。`README.upstream.md` 及其他上游设计、测试文档是继承资料，不能当作本维护版重新完成了全部实机验收。
 
-当前源码发行号为 `0.2.0-qinglong.9`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
+当前源码发行号为 `0.2.0-qinglong.10`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
 
 当前维护策略是保持目标环境已验收的发行包。后续排障先核对实际安装，不因单次报错、上游发版或官网模型改名自动升级。源码新增修复不等于目标环境已迁移；安装包使用对应 Release 的 SHA256SUMS 核对，纯维护文档提交不替换包、标签或 Release 资产。
 
@@ -19,10 +19,10 @@ shasum -a 256 -c SHA256SUMS
 DSH 的插件安装目标是 profile。CLI 可用且目标 profile 没有被桌面占用时，使用其原生安装命令，文件名替换成实际下载路径：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.9.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-0.2.0-qinglong.10.tgz
 ```
 
-若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-0.2.0-qinglong.9.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
+若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-0.2.0-qinglong.10.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
 
 重启后核对实际安装版本、TokenFree 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。此前完整 `qinglong.3` 安装包已在 macOS DSH 0.2.1-rc.3 验证原长对话真实工具往返、双向模型选择和设置卡片；新环境及新修订版的安装仍需分别验收。
 
@@ -60,9 +60,23 @@ DSML 本身没有 request_id；仅绑定到上游已核实身份与完整历史�
 
 ## 后续升级
 
+### 官网限流与请求频率
+
+从 `qinglong.10` 起，官网 SSE `hint.finish_reason=rate_limit_reached` 直接归为 `RATE_LIMIT`，即使 HTTP 200、已经 ready 或同时出现 `clear_response=true`。清空是动作，不能取代同帧明确原因；SSE 层在清空快照携带固定的限流码/提示，SessionEngine 先撤下预览再保留该原因。缺少清空标记的明确限流也立即终止，不进入断流恢复或格式纠正，不额外生成。
+
+客户端只包装本插件的明确限流信息及 `DeepSeek Web ... HTTP 429`，标题为“官网限流”，提示稍后继续未完成步骤。不能把其他模型的 RATE_LIMIT 都标成 DeepSeek。未知原因的清空仍为未知撤回，明确 CONTENT_FILTER 仍为官网过滤。旧日志已经只保存未知撤回、没有限流原因时不能凭题材或时间猜着改标签；原生历史不改写，需查看对应原始 SSE。
+
+复杂工具任务通常按“模型规划 → 原生工具 → 返回结果 → 下一次模型规划”连续往返。一条用户消息可产生多次生成，多个工具也可合批；这不等于同时并发或重复提交。排查时逐个对齐 model.started/completed、step、web.request、纠正事件及原生工具结果，测重叠与计数，不用单个用户消息数推算服务端请求数。
+
+减少往返优先合并独立的只读检查、利用已有工具结果、停止无进展循环；依赖前序结果或需要独立审批的动作不盲目合并。本版本没有部署账号级队列、冷却或自动恢复；限流只明确停止，不能把修好提示当成已实施节流。后续请求守卫需单独设计并验证跨会话/进程准入、服务端退避和已接受请求的恢复边界。
+
+多账号轮换不提供防封保证：不能假定官网只按账号计数或声称换号无法关联。同一任务中途换账号也不能接续原账号的网页消息树，额外导入历史可能增加请求与重复执行风险。默认单账号，无自动轮换。查询于 2026-10-25 的[官方使用条款](https://cdn.deepseek.com/policies/zh-CN/deepseek-terms-of-use.html) 2.3 禁止恶意频繁/批量注册，8.2 保留限制或关闭账号的措施；不能由一次限流推断封号概率或安全频率，也不把所有多账号使用一概判为条款禁止。
+
+回归分别验证原始帧重放、清空与错误码传递、无格式纠正/续传/新生成、零工具交付、HTTP 429、普通模型正文中的相同文字不影响分类、未知清空和真实过滤，以及构建客户端的标题、其他提供方回退和卸载。离线重放不向官网请求，不故意触发真实限流，不重新执行用户已完成任务。
+
 ### 官网过滤与撤回提示
 
-`CONTENT_RETRACTED` 保持原错误码。官网 SSE 明确返回 `status: CONTENT_FILTER` 时，主机错误文字与 Chat 标题直接说明“官网内容过滤”；仅有 `clear_response` 等撤回信号时说明“官网撤回了回答，未提供具体原因”。不按题材猜过滤、不增加联网重试、不把拒答写成成功或可执行工具。
+`CONTENT_RETRACTED` 保持原错误码。官网 SSE 明确返回 `status: CONTENT_FILTER` 时，主机错误文字与 Chat 标题直接说明“官网内容过滤”；仅有 `clear_response` 等撤回信号、且没有明确限流原因时说明“官网撤回了回答，未提供具体原因”。不按题材猜过滤、不增加联网重试、不把拒答写成成功或可执行工具。
 
 客户端通过公开的 `conversation.chat.node` keyed slot 包装 `turn-error`，识别旧历史错误中的明确 `CONTENT_FILTER` 标记。其他错误完整委托给当前原生组件；插件卸载恢复原生呈现。若宿主插槽或原生组件接线已变化则保留其原生界面，主机中文错误仍可读；不修改 DSH 应用资源或历史日志。
 

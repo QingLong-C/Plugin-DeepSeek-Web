@@ -8,6 +8,7 @@ export class WebResponseState {
   private operation = 'SET'
   private identity?: WebIdentity
   private cleared = false
+  private clearError?: WebSnapshot['clearError']
   done = false
   constructor(private readonly chatId = '', identity?: WebIdentity) { this.identity = identity }
   ready(value: unknown): WebIdentity {
@@ -20,7 +21,7 @@ export class WebResponseState {
     this.identity = identity
     return identity
   }
-  clear() { this.cleared = true }
+  clear(error?: WebSnapshot['clearError']) { this.cleared = true; this.clearError = error }
   apply(frame: unknown, depth = 0): void {
     if (depth > 16 || !record(frame)) throw new LlmError('Invalid Web patch nesting or event.', 'WEB_PROTOCOL')
     if (frame.error || (typeof frame.code === 'number' && frame.code !== 0)) throw new LlmError('Web service refused the request.', 'WEB_REJECTED')
@@ -77,13 +78,14 @@ export class WebResponseState {
   }
   snapshot(): WebSnapshot {
     const response = this.root.response
-    if (!record(response)) return { identity: this.identity, text: '', reasoning: '', cleared: this.cleared }
+    if (!record(response)) return { identity: this.identity, text: '', reasoning: '', cleared: this.cleared, ...(this.clearError ? { clearError: this.clearError } : {}) }
     if (this.identity && response.message_id !== undefined && response.message_id !== this.identity.responseId) throw new LlmError('Web snapshot belongs to another response.', 'WEB_IDENTITY')
     const fragments = Array.isArray(response.fragments) ? response.fragments.filter(record) : []
     const content = (kind: string) => fragments.filter(f => f.type === kind).map(f => typeof f.content === 'string' ? f.content : '').join('')
     const usage = response.accumulated_token_usage
     return { identity: this.identity, text: content('RESPONSE'), reasoning: content('THINK'),
       status: typeof response.status === 'string' ? response.status : undefined, cleared: this.cleared,
+      ...(this.clearError ? { clearError: this.clearError } : {}),
       ...(typeof usage === 'number' && Number.isSafeInteger(usage) && usage >= 0 ? { usage } : {}) }
   }
   text(): string { return this.snapshot().text }
@@ -112,7 +114,14 @@ export async function* readWebEvents(response: Response, chatId: string, identit
     yield { type: 'event', name, data: value }
     if (name === 'error') throw new LlmError('Web stream reported an error.', 'WEB_REJECTED')
     if (name === 'ready') { yield { type: 'ready', identity: state.ready(value) }; return }
-    if (name === 'hint' && record(value) && value.clear_response === true) { state.clear(); yield { type: 'snapshot', snapshot: state.snapshot() }; return }
+    if (name === 'hint' && record(value)) {
+      // A withdrawal is an action, not a cause. Keep the explicit service reason with it.
+      const limited = value.finish_reason === 'rate_limit_reached'
+        ? { code: 'RATE_LIMIT' as const, message: 'DeepSeek 官网限流（rate_limit_reached）：消息发送过于频繁，请稍后重试。' } : undefined
+      if (value.clear_response === true) { state.clear(limited); yield { type: 'snapshot', snapshot: state.snapshot() } }
+      if (limited) throw new LlmError(limited.message, limited.code)
+      return
+    }
     if (['finish', 'close', 'title', 'hint', 'toast'].includes(name) || payload === '[DONE]' || value === null) return
     if (record(value) && Object.keys(value).length) { state.apply(value); yield { type: 'snapshot', snapshot: state.snapshot() }; return }
     return
