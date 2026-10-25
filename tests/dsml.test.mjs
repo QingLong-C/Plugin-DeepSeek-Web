@@ -36,7 +36,7 @@ test('DSML complete batches keep ordering and reject the whole response on any u
   const two = wrapped('bash', { command: 'echo two' })
   assert.deepEqual(decode(calls(one, two)).map(x => JSON.parse(x.arguments).command), ['echo one', 'echo two'])
   for (const text of [calls(one, wrapped('unknown', {})), calls(...Array(9).fill(one))]) {
-    assert.throws(() => decode(text), error => error.code === 'WEB_TOOL_FORMAT' && error.repairable === false)
+    assert.throws(() => decode(text), error => error.code === 'WEB_TOOL_FORMAT' && ['syntax', 'tool'].includes(error.stage))
   }
 })
 
@@ -50,7 +50,7 @@ test('DSML rejects mixed prose, truncation, duplicate parameters and duplicate J
     valid.replace('string="false"', 'string="maybe"'),
     valid.replace('name="bash"', 'name="bash" extra="yes"'),
     calls(invoke('bash', parameter('arguments', 'not an object'))),
-  ]) assert.throws(() => decode(text), error => error.code === 'WEB_TOOL_FORMAT' && error.repairable === false)
+  ]) assert.throws(() => decode(text), error => error.code === 'WEB_TOOL_FORMAT' && ['syntax', 'tool'].includes(error.stage))
 })
 
 test('DSML does not bypass parameter validation, tool availability, or literal final JSON text', () => {

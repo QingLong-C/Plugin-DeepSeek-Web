@@ -7,6 +7,7 @@ export interface PolicyState extends SessionPolicy { revision: string }
 export type Block = { type: 'text'; text: string } | { type: 'reasoning'; text: string }
   | { type: 'tool-call'; id: string; name: string; arguments: string }
 export interface InputMessage {
+  context?: true
   id?: string
   role: string
   content: readonly unknown[]

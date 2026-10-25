@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
-import { TokenFreeError, ToolArgumentsError, record } from './errors.js'
+import { TokenFreeError, record } from './errors.js'
 import type { Block, ModelInput, NativeAttempt, NativeBoundary, CompactionAnchor, OfficialBudget, WebIdentity, WebMessage, WebSnapshot, WebTransport } from './types.js'
-import { canonical, catalogueHash, decodeResponse, encodeFormatRepair, encodeToolCorrection, encodeProtocolCorrection, repeatedTaskCall, encodeInput, encodeSummary, FinalDecoder, messageHash, WebResponseFormatError } from './codec.js'
+import { canonical, catalogueHash, encodeInput, encodeSummary, FinalDecoder, messageHash } from './codec.js'
 import { streamsFinal } from './policy.js'
-import { toolJson } from './json.js'
+import { planRecovery, checkRecoveryResult } from './recovery.js'
 import type { UsageStatus } from './account-types.js'
 import { budgetFor, metricView, pressure } from './metrics.js'
 import { digest, LocalStore } from '../local/store.js'
@@ -47,6 +47,12 @@ export class SessionEngine {
     await this.store.update(operation.sessionKey, operation.id, change)
     this.dependencies.log?.write('operation.state', { operationId: operation.id, stage: operation.stage })
     this.dependencies.log?.content(operation.id, 'operation.state', { stage: operation.stage, identity: operation.identity, native: operation.native })
+  }
+  private async rejectUnsubmitted(operation: ActiveOperation): Promise<void> {
+    const repair = operation.repair
+    if (repair) await this.update(operation, { stage: 'failed', rebase: true, identity: repair.original,
+      parentId: repair.parentId, promptHash: repair.promptHash, verifiedPath: repair.path, finalStatus: 'FINISHED' })
+    else await this.update(operation, { stage: 'failed', knownRejected: true })
   }
   private verify(operation: ActiveOperation, messages: WebMessage[]): WebMessage {
     const identity = operation.identity
@@ -260,7 +266,7 @@ export class SessionEngine {
       if (!pending) return true
       if (pending.accountKey !== accountKey || pending.storeId !== this.dependencies.storeId) throw new TokenFreeError('Another account/store owns the pending operation.', 'PENDING_OPERATION')
       client.bindOperation?.(pending.id)
-      if (pending.stage === 'prepared') await this.update(pending, { stage: 'failed', knownRejected: true })
+      if (pending.stage === 'prepared') await this.rejectUnsubmitted(pending)
       else if (!pending.verifiedPath && !pending.knownRejected) {
         if (!pending.identity) await this.discover(pending, client, signal)
         if (requestStop || pending.stopRequested || pending.epoch !== (await this.store.account()).epoch) await this.stop(pending, client)
@@ -397,74 +403,24 @@ export class SessionEngine {
         let blocks: Block[]
         try { blocks = validate(raw, id) }
         catch (error) {
-          if (error instanceof ToolArgumentsError && repairAttempt) throw new ToolArgumentsError(`已自动纠正一次，参数仍不合格。${error.message}`, error.issue)
-          if (error instanceof WebResponseFormatError && repairAttempt && operation.repair?.mode === 'protocol') {
-            throw new WebResponseFormatError('已自动纠正一次，工具协议仍不完整或不合规；本步骤未执行工具。', false)
-          }
-          if (!summary && error instanceof WebResponseFormatError && error.protocolRepairable && !repairAttempt && !shown
-            && input.tools.length && input.policy?.tools.mode !== 'none') {
-            nextPrompt = encodeProtocolCorrection(input, id, this.dependencies.maxPromptChars)
-            signal.throwIfAborted()
-            await this.update(operation, { stage: 'prepared', expected: undefined,
-              repair: { mode: 'protocol', original: operation.identity!, candidateHash: digest(raw), parentId: operation.parentId,
-                promptHash: operation.promptHash, path: operation.verifiedPath! },
-              parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined,
-              finalStatus: undefined, promptHash: digest(nextPrompt) })
-            this.dependencies.log?.write('model.format-repair', { operationId: id, stage: 'tool-protocol', attempt: 1 })
-            repairAttempt++
-            continue
-          }
-          if (!summary && error instanceof ToolArgumentsError && !repairAttempt && !shown) {
-            // The whole batch is still undelivered. Diagnose each call without executing it.
-            const candidate = decodeResponse(raw, input.tools)
-            const calls = candidate.filter(block => block.type === 'tool-call')
-            const errors: (ToolArgumentsError['issue'] & { call: number; name: string })[] = []
-            for (const [index, call] of calls.entries()) {
-              try { validate(JSON.stringify({ protocol_version: 1, request_id: id, kind: 'tool', calls: [{ name: call.name, arguments: JSON.parse(call.arguments) }] }), id) }
-              catch (issue) {
-                if (!(issue instanceof ToolArgumentsError)) throw issue
-                errors.push({ ...issue.issue, call: index, name: call.name })
-              }
-            }
-            if (!errors.length) throw error
-            nextPrompt = encodeToolCorrection(input, id, calls, errors, this.dependencies.maxPromptChars)
-            signal.throwIfAborted()
-            await this.update(operation, { stage: 'prepared', expected: candidate,
-              repair: { mode: 'arguments', invalidCalls: errors.map(issue => issue.call), original: operation.identity!, candidateHash: digest(canonical(candidate)), parentId: operation.parentId, promptHash: operation.promptHash, path: operation.verifiedPath! },
-              parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined, finalStatus: undefined, promptHash: digest(nextPrompt) })
-            this.dependencies.log?.write('model.format-repair', { operationId: id, stage: 'tool-arguments', attempt: 1 })
-            repairAttempt++
-            continue
-          }
-          if (!(error instanceof WebResponseFormatError) || !error.repairable || repairAttempt || shown) throw error
-          const candidate = decodeResponse(raw, input.tools)
-          nextPrompt = encodeFormatRepair({ messages: [], tools: input.tools }, raw, this.dependencies.maxPromptChars, id)
-          // Wrapper-only repair must preserve the exact old intent; argument correction is handled above.
-          validate(JSON.stringify({ ...strictEnvelope(raw), protocol_version: 1, request_id: id }), id)
-          operation.expected = candidate
-          await this.update(operation, { repair: { original: operation.identity!, candidateHash: digest(canonical(candidate)), parentId: operation.parentId, promptHash: operation.promptHash, path: operation.verifiedPath! }, parentId: operation.identity!.responseId,
-            parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined, finalStatus: undefined, promptHash: digest(nextPrompt) })
+          const plan = planRecovery(error, raw, input, id, this.dependencies.maxPromptChars, validate, {
+            summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair),
+            confirmed: operation.finalStatus === 'FINISHED' && Boolean(operation.identity && operation.verifiedPath),
+          })
+          if (!plan) throw error
+          signal.throwIfAborted()
+          nextPrompt = plan.prompt
+          await this.update(operation, { stage: 'prepared', expected: plan.expected,
+            repair: { mode: plan.mode, invalidCalls: plan.invalidCalls, expectedKind: plan.expectedKind, failure: plan.failure,
+              original: operation.identity!, candidateHash: plan.candidateHash, parentId: operation.parentId,
+              promptHash: operation.promptHash, path: operation.verifiedPath! },
+            parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined,
+            finalStatus: undefined, promptHash: digest(nextPrompt) })
+          this.dependencies.log?.write('model.format-repair', { operationId: id, stage: plan.logStage, code: plan.failure.code, attempt: 1 })
           repairAttempt++
           continue
         }
-        if (operation.repair?.mode === 'protocol') {
-          if (!blocks.some(block => block.type === 'tool-call') || blocks.some(block => block.type === 'text') || repeatedTaskCall(input, blocks)) {
-            throw new WebResponseFormatError('已自动纠正一次，返回了无工具的说明、额外正文或重复的已交付调用；本步骤未执行工具。', false)
-          }
-        } else if (operation.repair?.mode === 'arguments') {
-          const repair = operation.repair
-          const expected = (operation.expected ?? []).filter(block => block.type === 'tool-call')
-          const actual = blocks.filter(block => block.type === 'tool-call')
-          if (!expected.length || actual.length !== expected.length || actual.some((call, index) => call.name !== expected[index]!.name
-            || !repair.invalidCalls?.includes(index) && canonical(JSON.parse(call.arguments)) !== canonical(JSON.parse(expected[index]!.arguments)))) {
-            throw new TokenFreeError('参数纠正改变了工具名称、顺序、数量或原本合格的调用；本步骤未执行工具。', 'WEB_TOOL_FORMAT')
-          }
-        } else if (operation.repair && digest(canonical(blocks.map(x => x.type === 'tool-call' ? { ...x, id: x.id } : x))) !== operation.repair.candidateHash) {
-          // Candidate was decoded with the same request identity for stable IDs below.
-          const expected = operation.expected ?? []
-          const semantics = (items: Block[]) => items.map(x => x.type === 'tool-call' ? { type: x.type, name: x.name, arguments: x.arguments } : x)
-          if (canonical(semantics(blocks)) !== canonical(semantics(expected))) throw new TokenFreeError('Formatting changed the original intent.', 'WEB_TOOL_FORMAT')
-        }
+        checkRecoveryResult(operation.repair, operation.expected, input, blocks)
         const textBlock = blocks.find(x => x.type === 'text')
         if (textBlock?.type === 'text' && input.stop.length && !blocks.some(x => x.type === 'tool-call')) {
           const truncated = visible(textBlock.text, input.stop, true)
@@ -481,9 +437,7 @@ export class SessionEngine {
       if (operation) {
         this.dependencies.log?.content(operation.id, 'preview', { text: error instanceof TokenFreeError && error.code === 'CONTENT_RETRACTED' ? '' : shown, reasoning: shownReasoning, failed: true })
         if ((error instanceof TokenFreeError && error.details?.accepted === false) || (operation.repair && operation.stage === 'prepared')) {
-          if (operation.repair) await this.update(operation, { stage: 'failed', rebase: true, identity: operation.repair.original,
-            parentId: operation.repair.parentId, promptHash: operation.repair.promptHash, verifiedPath: operation.repair.path, finalStatus: 'FINISHED' })
-          else await this.update(operation, { stage: 'failed', knownRejected: true })
+          await this.rejectUnsubmitted(operation)
         }
         else if (operation.verifiedPath) await this.update(operation, { stage: signal.aborted ? 'stopped' : 'failed', rebase: true, responseText: raw, reasoning })
         else if (operation.chatId && operation.stage !== 'prepared') await this.stop(operation, client)
@@ -500,9 +454,4 @@ export class SessionEngine {
       await release()
     }
   }
-}
-function strictEnvelope(text: string): Record<string, unknown> {
-  const value: unknown = toolJson(text)
-  if (!record(value)) throw new TokenFreeError('Invalid formatting candidate.', 'WEB_TOOL_FORMAT')
-  return value
 }

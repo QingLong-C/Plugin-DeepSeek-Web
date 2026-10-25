@@ -30,7 +30,7 @@ export function projectMessage(value: unknown): InputMessage {
     return x
   })
   const source = record(value.source) ? value.source : undefined
-  return { ...(typeof value.id === 'string' ? { id: value.id } : {}), role: value.role, content,
+  return { ...(value.role === 'user' && ['agent-instructions', 'runtime-context', 'skill-catalog', 'time-context'].includes(String(source?.kind)) ? { context: true as const } : {}), ...(typeof value.id === 'string' ? { id: value.id } : {}), role: value.role, content,
     ...(value.role === 'tool' && typeof source?.callId === 'string' ? { callId: source.callId } : {}),
     ...(value.role === 'tool' && typeof value.isError === 'boolean' ? { isError: value.isError } : {}) }
 }
@@ -81,13 +81,13 @@ export function responseShape(text: string): ResponseShape {
   catch { return text.trim().startsWith('<') ? 'tagged' : 'plain-text' }
 }
 export class WebResponseFormatError extends LlmError {
-  constructor(message: string, readonly repairable: boolean, readonly protocolRepairable = false) { super(message, 'WEB_TOOL_FORMAT') }
+  constructor(message: string, readonly stage: 'syntax' | 'envelope' | 'tool' | 'wrapper' = 'syntax', readonly intent?: 'final' | 'tool') { super(message, 'WEB_TOOL_FORMAT') }
 }
 
 /** Parse one complete DSML batch; never search prose for commands or execute here. */
 function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string, recovered?: () => void): unknown {
   let cursor = 0
-  const invalid = (protocolRepairable = true): never => { throw new WebResponseFormatError('Invalid or ambiguous DSML tool batch. No tools were executed.', false, protocolRepairable) }
+  const invalid = (): never => { throw new WebResponseFormatError('Invalid or ambiguous DSML tool batch. No tools were executed.', 'tool', 'tool') }
   const ws = () => { while (/[ \t\r\n]/.test(text[cursor] ?? '') && cursor < text.length) cursor++ }
   const take = (pattern: RegExp): RegExpExecArray => {
     ws()
@@ -105,7 +105,7 @@ function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string, recover
     if (calls.length === 8) return invalid()
     const name = take(/^<｜｜DSML｜｜ invoke name="([^"<>\r\n]+)">/)[1]!
     const tool = tools.find(tool => tool.name === name)
-    if (!tool) return invalid(false)
+    if (!tool) return invalid()
     const parameters: Record<string, unknown> = Object.create(null)
     let count = 0, wrapped = false
     for (;;) {
@@ -113,7 +113,7 @@ function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string, recover
       if (text.startsWith('</｜｜DSML｜｜ invoke>', cursor)) break
       const parameter = take(/^<｜｜DSML｜｜ parameter name="([^"<>\r\n]+)" string="(true|false)">/)
       const key = parameter[1]!
-      if (Object.hasOwn(parameters, key)) return invalid(false)
+      if (Object.hasOwn(parameters, key)) return invalid()
       const end = text.indexOf(closeParameter, cursor)
       if (end < 0) return invalid()
       const body = text.slice(cursor, end)
@@ -154,41 +154,40 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
   let changed = source !== text
   const note = () => { changed = true }
   if (source.trimStart().startsWith('<｜｜DSML｜｜ calls>')) value = dsmlEnvelope(source, tools, id, note)
-  else try { value = toolJson(source, note) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', false,
-    /^\s*\{/.test(source) && /"kind"\s*:\s*"tool"/.test(source)) }
-  if (!record(value)) throw new WebResponseFormatError('Invalid Web response object.', false)
+  else try { value = toolJson(source, note) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', 'syntax') }
+  if (!record(value)) throw new WebResponseFormatError('Invalid Web response object.', 'envelope')
   if (id && ((value.request_id !== undefined && value.request_id !== id) || (value.protocol_version !== undefined && value.protocol_version !== 1))) throw new LlmError('Response protocol identity changed.', 'WEB_IDENTITY')
   const allowed = value.kind === 'tool' ? ['protocol_version', 'request_id', 'kind', 'calls', 'text'] : ['protocol_version', 'request_id', 'kind', 'text']
-  if (Object.keys(value).some(k => !allowed.includes(k))) throw new WebResponseFormatError('Unexpected response fields.', false)
+  if (Object.keys(value).some(k => !allowed.includes(k))) throw new WebResponseFormatError('Unexpected response fields.', 'envelope', value.kind === 'final' ? 'final' : value.kind === 'tool' ? 'tool' : undefined)
   const catalogue = new Map(tools.map(tool => [tool.name, tool]))
   let blocks: Block[]
   if (value.kind === 'final' && typeof value.text === 'string' && value.text.trim()) blocks = [{ type: 'text', text: value.text }]
   else if (value.kind === 'tool' && Array.isArray(value.calls) && value.calls.length > 0 && value.calls.length <= 8) {
     blocks = value.calls.map((call, index) => {
       if (!record(call) || Object.keys(call).some(k => !['name', 'arguments'].includes(k)) || typeof call.name !== 'string'
-        || !catalogue.has(call.name)) throw new WebResponseFormatError('Unknown tool or invalid complete tool arguments. No tools were executed.', false)
+        || !catalogue.has(call.name)) throw new WebResponseFormatError('Unknown tool or invalid complete tool arguments. No tools were executed.', 'tool', 'tool')
       let args = call.arguments
       if (typeof args === 'string') {
-        try { args = toolJson(args, note); note() } catch { throw new WebResponseFormatError('Invalid encoded tool arguments. No tools were executed.', false) }
+        try { args = toolJson(args, note); note() } catch { throw new WebResponseFormatError('Invalid encoded tool arguments. No tools were executed.', 'tool', 'tool') }
       }
-      if (!record(args)) throw new WebResponseFormatError('Invalid complete tool arguments. No tools were executed.', false)
+      if (!record(args)) throw new WebResponseFormatError('Invalid complete tool arguments. No tools were executed.', 'tool', 'tool')
       validate?.(catalogue.get(call.name)!, args)
       return { type: 'tool-call', id: `tokenfree_${id ?? 'standalone'}_${index}`, name: call.name, arguments: JSON.stringify(args) }
     })
     if (value.text !== undefined) {
-      if (typeof value.text !== 'string') throw new WebResponseFormatError('Invalid tool explanation.', false)
+      if (typeof value.text !== 'string') throw new WebResponseFormatError('Invalid tool explanation.', 'tool', 'tool')
       if (value.text) blocks.unshift({ type: 'text', text: value.text })
     }
-  } else throw new WebResponseFormatError('Invalid final/tool envelope. No tools were executed.', false)
-  if (id && (value.request_id === undefined || value.protocol_version === undefined)) throw new WebResponseFormatError('Missing response protocol wrapper.', true)
+  } else throw new WebResponseFormatError('Invalid final/tool envelope. No tools were executed.', 'envelope', value.kind === 'final' ? 'final' : value.kind === 'tool' ? 'tool' : undefined)
+  if (id && (value.request_id === undefined || value.protocol_version === undefined)) throw new WebResponseFormatError('Missing response protocol wrapper.', 'wrapper', value.kind === 'final' ? 'final' : 'tool')
   if (changed) recovered?.()
   return blocks
 }
-export function encodeFormatRepair(options: CodecOptions, rejected: string, maxChars: number, id = randomUUID()): string {
+export function encodeFormatRepair(options: CodecOptions, rejected: string, maxChars: number, id: string = randomUUID()): string {
   // Only a complete unambiguous existing intent can reach this path.
   decodeResponse(rejected, options.tools)
   const prompt = `${protocol}\nFORMAT_REPAIR ${id}: preserve the following complete kind/text or calls EXACTLY. Add protocol_version=1 and request_id=${JSON.stringify(id)} only. No new task or tool.\nCANDIDATE_JSON:\n${rejected}`
-  if (prompt.length > maxChars) throw new WebResponseFormatError('Formatting input exceeds the local character limit.', false)
+  if (prompt.length > maxChars) throw new LlmError('Formatting input exceeds the local character limit.', 'INPUT_TOO_LARGE')
   return prompt
 }
 
@@ -199,23 +198,23 @@ export function encodeToolCorrection(input: ModelInput, id: string, calls: Extra
     tools: input.tools.filter(tool => names.has(tool.name)),
     response_policy: input.policy ? { tools: input.policy.tools, output: input.policy.output } : { tools: { mode: 'auto' }, output: { type: 'text' } }, response_contract: responseContract(input, id) }
   const prompt = `${protocol}\nThe previous assistant tool batch was NOT executed. This is the only automatic correction attempt. Correct the identified argument schema errors using the original task and declared tools. Preserve tool names, order and count, and preserve every already-valid call exactly. Do not invent missing user facts or claim a tool result. Return the entire corrected batch with this request_id and protocol_version. If correction needs unavailable facts, explain the blocker instead of guessing; no tool will execute.\nTOOL_ARGUMENT_CORRECTION_JSON:\n${JSON.stringify(body)}`
-  if (prompt.length > maxChars) throw new WebResponseFormatError('Tool correction input exceeds the local character limit; no correction was sent.', false)
+  if (prompt.length > maxChars) throw new LlmError('Tool correction input exceeds the local character limit; no correction was sent.', 'INPUT_TOO_LARGE')
   return prompt
 }
 
 /** Replan one undelivered tool step from authoritative input, never extract a command from broken text. */
-export function encodeProtocolCorrection(input: ModelInput, id: string, maxChars: number): string {
+export function encodeProtocolCorrection(input: ModelInput, id: string, maxChars: number, expectedKind: 'tool' | 'final' | 'auto' = 'tool', failure?: { stage: string; code: string }): string {
   const context = encodeInput(input, id, 0, [], true, maxChars)
-  const correction = { protocol_version: 1, request_id: id, attempt: 1, expected_kind: 'tool',
-    instruction: 'The entire previous assistant response is malformed and was NOT delivered to DSH. Discard its tool calls, claimed results and simulated conversation. Only the DSH_INPUT_JSON above contains authoritative task context and real previous tool results. Continue the pending inspection/action from that context. Do not repeat earlier delivered calls, downloads or other completed work. Do not invent missing facts. Return ONE JSON tool envelope with valid arguments, no narration or claimed result. If you cannot safely determine the pending action, explain the blocker instead; no tool will execute.' }
+  const correction = { protocol_version: 1, request_id: id, attempt: 1, expected_kind: expectedKind, failure,
+    instruction: 'The entire previous assistant response is malformed and was NOT delivered to DSH. Discard its tool calls, claimed results and simulated conversation. Only the DSH_INPUT_JSON above contains authoritative task context and real previous tool results. Continue the pending inspection/action from that context. Do not repeat earlier delivered calls, downloads or other completed work. Do not invent missing facts. Return ONE JSON envelope of expected_kind, obeying the response policy and output schema. If expected_kind is auto, choose tool or final from the authoritative pending task; do not call unnecessary tools. For tools, return only calls with valid arguments and no narration or claimed result. For final, use final.text and never claim an action ran unless a real DSH result proves it. If you cannot safely determine the pending action, explain the blocker instead; no tool will execute.' }
   const prompt = `${context}\n\nDSH_PROTOCOL_CORRECTION_JSON:\n${JSON.stringify(correction)}`
-  if (prompt.length > maxChars) throw new WebResponseFormatError('Protocol correction input exceeds the local character limit; no correction was sent.', false)
+  if (prompt.length > maxChars) throw new LlmError('Protocol correction input exceeds the local character limit; no correction was sent.', 'INPUT_TOO_LARGE')
   return prompt
 }
 
 /** Exact duplicates of this task's already delivered calls must not be replayed by a protocol retry. */
 export function repeatedTaskCall(input: ModelInput, blocks: Block[]): boolean {
-  const start = input.messages.findLastIndex(message => message.role === 'user')
+  const start = input.messages.findLastIndex(message => message.role === 'user' && !message.context)
   const earlier = new Set(input.messages.slice(Math.max(0, start)).filter(message => message.role === 'assistant')
     .flatMap(message => message.content).filter((block): block is Record<string, unknown> => record(block) && block.type === 'tool-call').map(block => {
       if (typeof block.name !== 'string' || typeof block.arguments !== 'string') return ''
@@ -261,25 +260,25 @@ export class FinalDecoder {
         if (this.unicode) {
           this.unicode += c
           if (this.unicode.length === 5) {
-            if (!/^u[\da-f]{4}$/i.test(this.unicode)) throw new WebResponseFormatError('Invalid JSON unicode escape.', false)
+            if (!/^u[\da-f]{4}$/i.test(this.unicode)) { this.phase = 'opaque'; return }
             decoded = String.fromCharCode(parseInt(this.unicode.slice(1), 16)); this.unicode = ''
           } else continue
         } else if (this.escape) {
           this.escape = false
           if (c === 'u') { this.unicode = 'u'; continue }
           const map: Record<string, string> = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' }
-          if (!Object.hasOwn(map, c)) throw new WebResponseFormatError('Invalid JSON string escape.', false)
+          if (!Object.hasOwn(map, c)) { this.phase = 'opaque'; return }
           decoded = map[c]!
         } else if (c === '\\') { this.escape = true; continue }
         else if (c === '"') {
           if (this.stringRole === 'key') {
             this.key = this.token
-            if (Object.hasOwn(this.fields, this.key)) throw new WebResponseFormatError('Duplicate envelope key.', false)
+            if (Object.hasOwn(this.fields, this.key)) { this.phase = 'opaque'; return }
             this.phase = 'colon'
           } else { this.fields[this.key] = this.token; this.phase = 'separator' }
           continue
         } else {
-          if (c.charCodeAt(0) < 32) throw new WebResponseFormatError('Invalid JSON control character.', false)
+          if (c.charCodeAt(0) < 32) { this.phase = 'opaque'; return }
           decoded = c
         }
         this.token += decoded

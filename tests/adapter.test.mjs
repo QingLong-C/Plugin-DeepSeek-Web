@@ -139,7 +139,7 @@ test('malformed JSON, unknown tool, duplicate field or invalid schema never emit
       const chunks = []
       await assert.rejects(async () => { for await (const chunk of adapter.stream({ ...base(), tools: [tool] })) chunks.push(chunk) })
       assert.equal(chunks.some(x => x.blockType === 'tool-call' || x.type === 'tool-call-delta'), false)
-      assert.equal(f.web.generations.length, candidate.includes('"unexpected":true') || candidate.includes('name="read_marker"></') ? 2 : 1, candidate)
+      assert.equal(f.web.generations.length, 2, candidate)
     } finally { adapter.dispose(); await f.close() }
   }
 })

@@ -51,6 +51,8 @@ test('built client replaces only withdrawal rows, preserves native fallback and 
       ['INVALID_TOOL_CALL', '已自动纠正一次，参数仍不合格。', '工具参数不符合规则'],
       ['WEB_TOOL_FORMAT', '已自动纠正一次，工具协议仍不完整或不合规。', '工具参数格式错误'],
       ['OUTPUT_SCHEMA', 'Strict final output schema mismatch.', '回答格式不符合规则'],
+      ['OUTPUT_FORMAT', '已自动纠正一次，输出仍不合格。', '回答格式不符合规则'],
+      ['TOOL_CHOICE', '已自动纠正一次，工具选择仍不合格。', '工具选择不符合规则'],
     ]) {
       const ui = render(React.createElement(winner().component, props(code, message)))
       assert.ok(ui.getByText(heading))

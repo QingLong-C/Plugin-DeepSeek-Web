@@ -94,7 +94,7 @@ for(const text of ['null','[1,true,"x"]','42','""','{"ok":true}'])test('JSON fin
  }finally{await a.dispose();await f.close()}
 })
 
-test('malformed, duplicate, multiple, fenced or schema-invalid final values never deliver body or trigger repair',async()=>{
+test('invalid structured final values share one correction budget and never deliver unvalidated body',async()=>{
  for(const [text,output,extra]of [
   ['{"a":1,"a":2}',{type:'json'}],['{} {}',{type:'json'}],['```json\n{}\n```',{type:'json'}],
   ['[1,"2"]',{type:'schema',schema:{type:'array',items:{type:'integer'}}}],
@@ -107,7 +107,7 @@ test('malformed, duplicate, multiple, fenced or schema-invalid final values neve
   try{
    await a.setPolicy(id,policy({mode:'none'},output));f.native.begin(id);f.web.answer=p=>({protocol_version:1,request_id:p.request_id,kind:'final',text})
    const chunks=[];await assert.rejects(async()=>{for await(const c of a.stream({...options(id),...extra}))chunks.push(c)},e=>['OUTPUT_FORMAT','OUTPUT_SCHEMA'].includes(e.code))
-   assert.equal(chunks.some(x=>['text-delta','block-end','tool-call-delta'].includes(x.type)),false);assert.equal(f.web.generations.length,1)
+   assert.equal(chunks.some(x=>['text-delta','block-end','tool-call-delta'].includes(x.type)),false);assert.equal(f.web.generations.length,2)
   }finally{await a.dispose();await f.close()}
  }
 })
@@ -147,7 +147,7 @@ test('schema final supports scalar const, object constraints and oneOf without c
 test('disabled tools and a mixed named-tool batch never deliver executable calls',async()=>{
  for(const choice of [{mode:'none'},{mode:'named',name:tool.name}]){
   const f=await setup(),a=make(f),id='batch'
-  try{await a.setPolicy(id,policy(choice));f.native.begin(id);f.web.answer=p=>({protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:tool.name,arguments:{}},{name:'other',arguments:{}}]});const chunks=[];await assert.rejects(async()=>{for await(const c of a.stream(options(id,[tool,{...tool,name:'other'}])))chunks.push(c)});assert.equal(chunks.some(x=>x.type==='tool-call-delta'),false);assert.equal(f.web.generations.length,1)}finally{await a.dispose();await f.close()}
+  try{await a.setPolicy(id,policy(choice));f.native.begin(id);f.web.answer=p=>({protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:tool.name,arguments:{}},{name:'other',arguments:{}}]});const chunks=[];await assert.rejects(async()=>{for await(const c of a.stream(options(id,[tool,{...tool,name:'other'}])))chunks.push(c)});assert.equal(chunks.some(x=>x.type==='tool-call-delta'),false);assert.equal(f.web.generations.length,2)}finally{await a.dispose();await f.close()}
  }
 })
 

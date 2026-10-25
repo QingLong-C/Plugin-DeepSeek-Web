@@ -43,7 +43,7 @@ export interface ActiveOperation {
   finalStatus?: string
   stopRequested?: boolean
   rebase?: boolean
-  repair?: { mode?: 'arguments' | 'protocol'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; path: { id: number; parentId: number | null; hash: string }[] }
+  repair?: { expectedKind?: 'tool' | 'final' | 'auto'; failure?: { stage: string; code: string }; mode?: 'arguments' | 'protocol'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; path: { id: number; parentId: number | null; hash: string }[] }
   verifiedPath?: { id: number; parentId: number | null; hash: string }[]
   knownRejected?: boolean
   parentPath?: { id: number; parentId: number | null; hash: string }[]
@@ -96,6 +96,17 @@ const policy = (v: unknown) => {
   if (!record(v) || !text(v.revision)) return false
   try { const { revision: _, ...settings } = v; parsePolicy(settings); return true } catch { return false }
 }
+const repair = (v: unknown, chatId: unknown): boolean => v === undefined || (record(v)
+  && (v.mode === undefined || v.mode === 'arguments' || v.mode === 'protocol')
+  && (v.expectedKind === undefined || ['tool', 'final', 'auto'].includes(String(v.expectedKind)))
+  && record(v.original) && v.original.chatId === chatId && integer(v.original.requestId) && integer(v.original.responseId)
+  && hash(v.candidateHash) && hash(v.promptHash) && (v.parentId === null || integer(v.parentId))
+  && Array.isArray(v.path) && v.path.length > 0 && path(v.path) && v.path.at(-1)?.id === v.original.responseId
+  && (v.invalidCalls === undefined || (Array.isArray(v.invalidCalls) && v.invalidCalls.length > 0
+    && v.invalidCalls.every(i => integer(i) && i < 8) && new Set(v.invalidCalls).size === v.invalidCalls.length))
+  && (v.mode !== 'arguments' || Array.isArray(v.invalidCalls))
+  && (v.failure === undefined || (record(v.failure) && ['syntax', 'envelope', 'tool', 'wrapper', 'arguments', 'policy', 'output'].includes(String(v.failure.stage))
+    && ['WEB_TOOL_FORMAT', 'INVALID_TOOL_CALL', 'TOOL_CHOICE', 'OUTPUT_FORMAT', 'OUTPUT_SCHEMA'].includes(String(v.failure.code)))))
 function validOperation(v: unknown): boolean {
   if (!record(v)) return false
   return text(v.id) && hash(v.accountKey) && integer(v.epoch) && hash(v.sessionKey) && text(v.storeId) && integer(v.generation)
@@ -108,7 +119,7 @@ function validOperation(v: unknown): boolean {
     && (v.native === undefined || (record(v.native) && v.native.sessionId === v.sessionId && integer(v.native.turn) && integer(v.native.step)
       && integer(v.native.afterSeq) && (v.native.settlementSeq === undefined || integer(v.native.settlementSeq))
       && (v.native.abandoned === undefined || typeof v.native.abandoned === 'boolean') && text(v.native.attemptId) && text(v.native.instance)))
-    && path(v.verifiedPath) && path(v.parentPath)
+    && path(v.verifiedPath) && path(v.parentPath) && repair(v.repair, v.chatId)
     && budget(v.budget) && (v.usage === undefined || integer(v.usage))
     && (v.kind === undefined ? v.compaction === undefined : v.kind === 'compaction' && anchor(v.compaction)
       && record(v.compaction) && v.compaction.sessionId === v.sessionId && v.compaction.thinking === v.thinking

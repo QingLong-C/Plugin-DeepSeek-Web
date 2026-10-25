@@ -80,13 +80,13 @@ test('format correction preserves full request context, treats candidate as data
   const prompt = encodeFormatRepair(options, candidate, 20000, 'fixture-id')
   assert.match(prompt, /FORMAT_REPAIR fixture-id/)
   assert.equal(prompt.split('CANDIDATE_JSON:\n')[1], candidate)
-  assert.throws(() => encodeFormatRepair(options, candidate, 10), error => error.code === 'WEB_TOOL_FORMAT')
+  assert.throws(() => encodeFormatRepair(options, candidate, 10), error => error.code === 'INPUT_TOO_LARGE')
   assert.equal(responseShape('```json\n{}\n```'), 'fenced')
   assert.equal(responseShape('<tool_call>fixture</tool_call>'), 'tagged')
   assert.equal(responseShape('hello'), 'plain-text')
   assert.equal(responseShape('{}'), 'json-object')
-  assert.throws(() => decodeResponse('hello', [tool]), error => error instanceof WebResponseFormatError && !error.repairable)
-  assert.throws(() => decodeResponse('{"kind":"tool","calls":[{"name":"unregistered","arguments":{}}]}', [tool]), error => error instanceof WebResponseFormatError && !error.repairable)
+  assert.throws(() => decodeResponse('hello', [tool]), error => error instanceof WebResponseFormatError && ['syntax', 'tool'].includes(error.stage))
+  assert.throws(() => decodeResponse('{"kind":"tool","calls":[{"name":"unregistered","arguments":{}}]}', [tool]), error => error instanceof WebResponseFormatError && ['syntax', 'tool'].includes(error.stage))
 })
 
 test('only complete valid batches of declared tool calls become executable', () => {
