@@ -56,6 +56,8 @@ dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.0.5.tgz
 
 ### 为什么原生 API 更稳定
 
+**账号登录与网页接口是两回事。** DSH 原生 `deepseek-account` 无需填写 API Key，但用账号令牌调用 Messages API，工具 schema 和工具块有独立字段；TokenFree 使用网页文本接口。可复用的客户端规则及对应执行位置见[原生工具规则维护基线](https://github.com/QingLong-C/Plugin-TokenFree/blob/main/maintenance/native-tool-rules.md)。不能把客户端 schema 转换或另一适配器的 strict 标志，视为网页版已具备服务端约束。
+
 2026-10-25 核对公开文档与本地 DSH 0.2.1-rc.3 的已安装代码：原生 DeepSeek Messages 使用独立的工具块和参数增量，在结束时检查 JSON；非法 JSON 或未收到完整终态仍会报错。其重试模块按策略、错误码、次数和服务端等待时间处理。另一 API 适配层包含按提供方能力选择 strict/schema 的代码，以及只供流式展示使用的部分 JSON 解析。这些都不能证明所有 API 路由默认 strict 或不会失败。
 
 [OpenAI Function Calling](https://developers.openai.com/api/docs/guides/function-calling) 的 strict 使用服务端结构约束，支持的 schema 有明确限制；[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) 仍要求处理拒答和不完整响应。普通 JSON 模式只约束 JSON，不等于完整参数规则。DeepSeek 也在[官方 Tool Calls](https://api-docs.deepseek.com/guides/tool_calls/) 文档中提供 API Beta strict，不能据此假设网页 completion 同样接受或执行 `strict:true`。
