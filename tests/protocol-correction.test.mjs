@@ -128,3 +128,24 @@ test('an earlier wrapper or argument correction cannot add a later protocol rege
   try{await assert.rejects(()=>collect(a.stream(opts())));assert.equal(f.web.generations.length,2)}finally{await a.dispose();await f.close()}
  }
 })
+
+
+test('rate rejection during protocol correction retries only that correction and keeps the one-repair budget',async()=>{
+ const f=await setup(),a=adapterFor(f)
+ try{
+  f.web.answer=(p,_,n)=>n===1?broken:answer(p)
+  f.web.completion=c=>{
+   if(f.web.generations.length===2){
+    f.web.chats.set(c.body.chat_session_id,f.web.chats.get(c.body.chat_session_id).filter(m=>![c.requestId,c.responseId].includes(m.message_id)))
+    return sse(c.ready+frame({type:'error',clear_response:true,finish_reason:'rate_limit_reached'},'hint'))
+   }
+   return sse(c.ready+frame(snapshot(c.text)))
+  }
+  const chunks=await collect(a.stream(opts()))
+  assert.equal(chunks.filter(c=>c.block?.type==='tool-call').length,1)
+  assert.equal(f.web.generations.length,3)
+  assert.equal(f.web.generations[1].prompt,f.web.generations[2].prompt)
+  assert.equal(f.web.generations[1].parent_message_id,f.web.generations[2].parent_message_id)
+  assert.equal(f.web.stops.length,0)
+ }finally{await a.dispose();await f.close()}
+})

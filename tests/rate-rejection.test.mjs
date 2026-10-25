@@ -7,14 +7,12 @@ import { LocalDiagnostics } from '../lib/local/diagnostics.js'
 import { decodeResponse } from '../lib/core/codec.js'
 import { loggedRateRejection } from '../lib/local/rate-rejection.js'
 const hint={type:'error',content:'消息发送过于频繁，请稍后重试',clear_response:true,finish_reason:'rate_limit_reached'}
-test('explicit rejection with absent official request settles without stop, generation retry or cursor advancement',async()=>{
+test('explicit rejection with absent official request retries only the refused generation and commits once',async()=>{
  const f=await setup();try{
-  f.web.completion=({ready,body})=>{f.web.chats.set(body.chat_session_id,[]);return sse(ready+frame(hint,'hint'))}
-  await assert.rejects(f.run(),e=>e.code==='RATE_LIMIT')
-  const op=await f.pending();assert.equal(op.knownRejected,true);assert.equal(op.rateRejected,true)
-  assert.equal(f.web.stops.length,0);assert.equal(f.web.generations.length,1)
-  f.native.cancel(op.native);await f.engine.reconcile('session-1');assert.equal(await f.pending(),undefined)
-  f.web.completion=undefined;await f.run();assert.equal(f.web.generations.length,2)
+  f.web.completion=({ready,body,text})=>{if(f.web.generations.length===1){f.web.chats.set(body.chat_session_id,[]);return sse(ready+frame(hint,'hint'))}return sse(ready+frame({v:{response:{status:'FINISHED',fragments:[{type:'RESPONSE',content:text}]}}}))}
+  const result=(await f.run()).find(e=>e.type==='result');assert(result)
+  assert.equal(f.web.stops.length,0);assert.equal(f.web.generations.length,2)
+  f.native.save(result);await f.engine.reconcile('session-1');assert.equal(await f.pending(),undefined)
  }finally{await f.close()}
 })
 test('legacy rate-limit journal requires exact control, request identity, durable failed native attempt and unchanged official parent',async()=>{

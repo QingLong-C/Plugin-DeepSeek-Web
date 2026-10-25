@@ -124,7 +124,7 @@ export class SessionEngine {
     try { return budgetFor(await client.settings(await this.store.deviceId(), signal), modelType, thinking) }
     catch (error) {
       signal.throwIfAborted()
-      if (error instanceof TokenFreeError && ['AUTH', 'ABORTED', 'WEB_CHALLENGE'].includes(error.code)) throw error
+      if (error instanceof TokenFreeError && ['AUTH', 'ABORTED', 'WEB_CHALLENGE', 'RATE_LIMIT'].includes(error.code)) throw error
       this.dependencies.log?.write('metrics.unavailable', { code: error instanceof TokenFreeError ? error.code : 'METRICS_UNKNOWN' })
       return budgetFor(undefined, modelType, thinking)
     }
@@ -269,12 +269,17 @@ export class SessionEngine {
       const saved = operation.native && await this.dependencies.native?.inspect(operation.native)
       if (!saved?.interrupted || saved.message || !(await loggedRateRejection(this.store.home, operation))) return false
     }
+    if (!(await this.rateRequestAbsent(operation, client, signal))) return false
+    await this.rejectUnsubmitted(operation)
+    return true
+  }
+  private async rateRequestAbsent(operation: ActiveOperation, client: WebTransport, signal: AbortSignal): Promise<boolean> {
     const messages = await client.history(operation.chatId!, signal)
-    if (messages.some(m => m.id === operation.identity!.requestId || m.id === operation.identity!.responseId
+    if (messages.some(m => m.id === operation.identity?.requestId || m.id === operation.identity?.responseId
       || m.role === 'USER' && m.parentId === operation.parentId && digest(m.content) === operation.promptHash)) return false
     if (operation.parentId !== null && (!operation.parentPath
       || canonical(pathOf(messages, operation.parentId)) !== canonical(operation.parentPath))) return false
-    await this.rejectUnsubmitted(operation)
+    if (operation.compaction && canonical(pathOf(messages, operation.compaction.oldParentId)) !== canonical(operation.compaction.oldPath)) return false
     return true
   }
   private async verifyOperation(accountKey: string, client: WebTransport, signal: AbortSignal, key: string, requestStop = false): Promise<boolean> {
@@ -324,6 +329,30 @@ export class SessionEngine {
     let monitoring: ReturnType<typeof setInterval> | undefined
     const revoked = new AbortController()
     signal = AbortSignal.any([signal, revoked.signal])
+    const taskSignal = signal
+    const recordedRates = new WeakSet<TokenFreeError>()
+    let rateAttempt = 0
+    const startBudget = () => {
+      budgetSignal = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs)
+      signal = budgetSignal ? AbortSignal.any([taskSignal, budgetSignal]) : taskSignal
+    }
+    const rateWait = async (error: TokenFreeError) => {
+      if (!recordedRates.has(error)) { await lease!.failed(error); recordedRates.add(error) }
+      this.dependencies.log?.write('model.queued', { operationId: id, code: 'RATE_LIMIT', stage: 'rate-limit-cooldown', attempt: ++rateAttempt })
+      await lease!.wait(taskSignal)
+      startBudget()
+    }
+    // Only read-only metadata or a creation explicitly refused before acceptance.
+    const metadata = async <T>(read: (active: AbortSignal) => Promise<T>, kind: 'read' | 'create' = 'read'): Promise<T> => {
+      for (;;) {
+        try { return await read(signal) }
+        catch (error) {
+          if (signal.aborted || !(error instanceof TokenFreeError) || error.code !== 'RATE_LIMIT'
+            || kind === 'create' && error.details?.accepted !== false) throw error
+          await rateWait(error)
+        }
+      }
+    }
     try {
       let account = await this.store.account()
       const queueEpoch = account.epoch
@@ -331,7 +360,7 @@ export class SessionEngine {
       monitoring.unref()
       this.dependencies.log?.write('model.queued', { operationId: id, stage: 'account-admission' })
       lease = await this.store.requestGate(accountKey).enter(signal)
-      if (timeoutMs !== undefined) { budgetSignal = AbortSignal.timeout(timeoutMs); signal = AbortSignal.any([signal, budgetSignal]) }
+      startBudget()
       if ((await this.store.account()).epoch !== queueEpoch) throw new TokenFreeError('Account changed while queued.', 'ABORTED')
       if (expectedEpoch !== undefined && expectedEpoch !== account.epoch) throw new TokenFreeError('Account changed before admission.', 'ABORTED')
       if (await this.store.pending(sessionKey)) {
@@ -353,7 +382,7 @@ export class SessionEngine {
       if (summary && (previous?.accountKey !== accountKey || !previous?.chatId || !previous.webPath?.length || !client.editRoot)) throw new TokenFreeError('A confirmed original chat for this account and root editor are required for compaction.', 'COMPACTION_UNAVAILABLE')
       if (previous && !summary && ['awaiting-checkpoint', 'failed'].includes(previous.compaction?.phase ?? '')) throw new TokenFreeError('The previous compaction needs native verification or an explicit manual retry.', 'COMPACTION_PENDING')
       if (previous && (!rebase || summary)) {
-        await this.refresh(previous, client, input.thinking, signal, Boolean(summary), expectedEpoch ?? account.epoch)
+        await metadata(active => this.refresh(previous, client, input.thinking, active, Boolean(summary), expectedEpoch ?? account.epoch))
         if (!summary && pressure(previous)) throw new TokenFreeError('Context count reached 50% of the effective budget; native TokenFree compaction must complete first.', 'COMPACTION_REQUIRED')
       }
       client.bindOperation?.(id)
@@ -371,18 +400,20 @@ export class SessionEngine {
 
       if (!operation.chatId) {
         await this.update(operation, { stage: 'creating' })
-        const chatId = await client.create(signal)
+        const chatId = await metadata(active => client.create(active), 'create')
         await this.update(operation, { chatId, stage: 'prepared' })
         await this.preserveInitialization(operation)
       }
       let repairAttempt = 0
       let nextPrompt = prompt
-      for (;;) {
-        signal.throwIfAborted()
+      generation: for (;;) {
+        taskSignal.throwIfAborted()
         decoder = new FinalDecoder(id)
         raw = ''; reasoning = ''; revision = false
-        await lease.submission(signal)
-        await this.update(operation, { stage: 'sending', rateRejected: false })
+        await lease.submission(taskSignal)
+        startBudget()
+        const beforeShown = shown, beforeReasoning = shownReasoning
+        await this.update(operation, { stage: 'sending', rateRejected: false, knownRejected: undefined, identity: undefined })
         let resumes = 0
         let source = summary ? client.editRoot!(operation.chatId!, operation.compaction!.rootId, nextPrompt, input.thinking, signal)
           : client.generate(operation.chatId!, operation.parentId, nextPrompt, input.thinking && repairAttempt === 0, signal)
@@ -392,8 +423,8 @@ export class SessionEngine {
               signal.throwIfAborted()
               if (event.type === 'event') {
                 this.dependencies.log?.content(id, 'web.event', { name: event.name, data: event.data, resume: resumes, step: repairAttempt })
-                if (event.name === 'hint' && record(event.data) && event.data.type === 'error' && event.data.clear_response === true
-                  && event.data.finish_reason === 'rate_limit_reached' && !raw && !reasoning && !shown && !shownReasoning && !resumes && !repairAttempt) {
+                if (event.name === 'hint' && record(event.data) && event.data.type === 'error'
+                  && event.data.finish_reason === 'rate_limit_reached' && !raw && !reasoning && shown === beforeShown && shownReasoning === beforeReasoning && !resumes) {
                   await this.update(operation, { rateRejected: true })
                 }
                 continue
@@ -404,6 +435,8 @@ export class SessionEngine {
               }
               const snapshot: WebSnapshot = event.snapshot
               if (snapshot.cleared) {
+                if (snapshot.clearError?.code === 'RATE_LIMIT' && operation.rateRejected && !raw && !reasoning
+                  && shown === beforeShown && shownReasoning === beforeReasoning) throw new TokenFreeError(snapshot.clearError.message, 'RATE_LIMIT')
                 withdrawn = true
                 this.dependencies.log?.write('stream.withdrawn', { operationId: id })
                 yield { type: 'withdraw' }
@@ -422,6 +455,21 @@ export class SessionEngine {
             }
             break
           } catch (error) {
+            if (!signal.aborted && error instanceof TokenFreeError && error.code === 'RATE_LIMIT' && !raw && !reasoning
+              && shown === beforeShown && shownReasoning === beforeReasoning && !resumes
+              && (error.details?.accepted === false || operation.rateRejected && Boolean(operation.identity))) {
+              // Keep this native attempt and prompt. No assistant/tool batch has been delivered.
+              // SSE refusal and non-root retries must also prove fresh, unchanged official ancestry.
+              if ((operation.rateRejected || operation.parentId !== null || operation.compaction)
+                && !(await metadata(active => this.rateRequestAbsent(operation!, client, active)))) throw error
+              await this.update(operation, { stage: 'prepared', knownRejected: true, identity: undefined, rateRejected: false })
+              await rateWait(error)
+              // Recheck the parent after the wait, since a user can edit the website meanwhile.
+              if (operation.parentId !== null || operation.compaction) {
+                if (!(await metadata(active => this.rateRequestAbsent(operation!, client, active)))) throw new TokenFreeError('Web parent changed while waiting; no request was repeated.', 'WEB_CONTEXT_CHANGED')
+              }
+              continue generation
+            }
             if (signal.aborted || !(error instanceof TokenFreeError) || error.details?.accepted === false || !['WEB_DISCONNECTED', 'TRANSPORT'].includes(error.code) || resumes >= 2) throw error
             if (!operation.identity) await this.discover(operation, client, signal)
             resumes++
@@ -430,12 +478,12 @@ export class SessionEngine {
           }
         }
         if (!operation.identity) await this.discover(operation, client, signal)
-        const messages = await client.history(operation.chatId!, signal)
+        const messages = await metadata(active => client.history(operation!.chatId!, active))
         const response = this.verify(operation, messages)
         if (response.status !== 'FINISHED' || response.content !== raw) throw new TokenFreeError('History did not confirm the same completed response.', 'WEB_IDENTITY')
         await this.update(operation, { finalStatus: 'FINISHED', verifiedPath: pathOf(messages, response.id), usage: response.usage, usageSource: 'history', usageObservedAt: new Date().toISOString(),
           identity: { ...operation.identity!, ...(response.modelType ? { modelType: response.modelType } : {}) },
-          budget: await this.settingsBudget(client, response.modelType ?? operation.identity?.modelType, input.thinking, signal) })
+          budget: await metadata(active => this.settingsBudget(client, response.modelType ?? operation!.identity?.modelType, input.thinking, active)) })
         this.dependencies.log?.content(id, 'metrics.observed', { identity: operation.identity, count: operation.usage, source: operation.usageSource, observedAt: operation.usageObservedAt, budget: operation.budget, thinking: input.thinking })
         this.dependencies.log?.content(id, 'web.response', { formatStage: repairAttempt ? 'repair' : 'initial', text: raw })
         let blocks: Block[]
@@ -474,7 +522,7 @@ export class SessionEngine {
       }
     } catch (error) {
       const generationTimedOut = budgetSignal?.aborted
-      await lease?.failed(error)
+      if (!(error instanceof TokenFreeError) || !recordedRates.has(error)) await lease?.failed(error)
       if (operation) {
         this.dependencies.log?.content(operation.id, 'preview', { text: withdrawn || error instanceof TokenFreeError && error.code === 'CONTENT_RETRACTED' ? '' : shown, reasoning: shownReasoning, failed: true })
         if ((error instanceof TokenFreeError && error.details?.accepted === false) || (operation.repair && operation.stage === 'prepared')) {

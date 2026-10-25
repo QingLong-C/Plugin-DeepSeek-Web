@@ -8,6 +8,7 @@ export interface RequestPolicy { intervalMs: number; cooldownMs: number; maxCool
 export const defaultRequestPolicy: Readonly<RequestPolicy> = Object.freeze({ intervalMs: 10_000, cooldownMs: 60_000, maxCooldownMs: 900_000 })
 interface State { version: 1; next: number; until: number; strikes: number }
 export interface RequestLease {
+  wait(signal: AbortSignal): Promise<void>
   submission(signal: AbortSignal): Promise<void>
   failed(error: unknown): Promise<void>
   succeeded(): Promise<void>
@@ -47,6 +48,7 @@ export class AccountRequestGate {
       await wait(Math.max(state.next, state.until), signal)
       const check = () => { if (released) throw new TokenFreeError('Account lease was released.', 'STATE_STORAGE') }
       return {
+        wait: async active => { check(); await wait(Math.max(state.next, state.until), active) },
         submission: async active => { check(); await wait(Math.max(state.next, state.until), active); state.next = Date.now() + this.policy.intervalMs; await writeJson(this.path, state) },
         failed: async error => {
           check()

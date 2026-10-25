@@ -160,9 +160,19 @@ export class TokenFreeAdapter extends LlmAdapter {
     const accountKey = digest(['deepseek-web-account', credential.accountId])
     const lease = await this.store.requestGate(accountKey).enter(signal)
     try {
-      return await (await this.engine()).refreshMetrics(sessionId, accountKey, client, thinking, AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]),
-        messages ? modelInput({ messages }).messages.map(messageHash) : undefined, credential.epoch)
-    } catch (error) { await lease.failed(error); throw error }
+      for (;;) {
+        await lease.wait(signal)
+        try {
+          return await (await this.engine()).refreshMetrics(sessionId, accountKey, client, thinking, AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]),
+            messages ? modelInput({ messages }).messages.map(messageHash) : undefined, credential.epoch)
+        } catch (error) {
+          signal.throwIfAborted()
+          await lease.failed(error)
+          if (!(error instanceof TokenFreeError) || error.code !== 'RATE_LIMIT') throw error
+          this.dependencies.diagnostics?.write('model.queued', { code: 'RATE_LIMIT', stage: 'metrics-rate-limit-cooldown' })
+        }
+      }
+    }
     finally { await lease.release() }
   }
   async withCompaction<T>(anchor: CompactionAnchor, operation: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {

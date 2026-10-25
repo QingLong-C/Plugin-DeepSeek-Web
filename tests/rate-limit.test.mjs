@@ -23,11 +23,11 @@ test('explicit rate-limit hints retain their cause through withdrawal and withou
   }
 })
 
-test('real adapter exposes RATE_LIMIT without tools, resume or format correction', async () => {
-  for (const mode of ['clear', 'keep', 'http429']) {
+test('real adapter exposes unproven SSE rejection without tools, resume or format correction', async () => {
+  for (const mode of ['clear', 'keep']) {
   const f = await setup(), chunks = []
   const adapter = new TokenFreeAdapter({}, { store: f.store, native: f.native, credential: async () => ({ token: 'fixture', accountId: 'fixture-owner' }), client: () => f.web.client() })
-  f.web.completion = ({ ready }) => mode === 'http429' ? new Response('rate limited', { status: 429 }) : sse(ready + frame({ ...hint, clear_response: mode === 'clear' }, 'hint'))
+  f.web.completion = ({ ready }) => sse(ready + frame({ ...hint, clear_response: mode === 'clear' }, 'hint'))
   try {
     await assert.rejects(async () => {
       for await (const chunk of adapter.stream({ provider: PROVIDER, model: MODEL, tools: [tool], messages: [{ role: 'user', content: [{ type: 'text', text: 'Continue only the unfinished inspection.' }] }] })) chunks.push(chunk)
@@ -76,10 +76,10 @@ test('unknown clear_response stays an unexplained withdrawal instead of guessing
   finally { await f.close() }
 })
 
-test('HTTP 429 preserves valid Retry-After for shared admission and never turns a transport failure into non-acceptance',async()=>{
+test('HTTP 429 transport preserves valid Retry-After and explicit non-acceptance',async()=>{
  const f=await setup();try{
   f.web.completion=()=>new Response('',{status:429,headers:{'Retry-After':'120'}})
-  await assert.rejects(f.run(),e=>e.code==='RATE_LIMIT'&&e.details.accepted===false&&e.details.retryAfterMs===120000)
-  const state=JSON.parse(await readFile(join(f.home,'requests',f.accountKey+'.json'),'utf8'));assert.equal(state.strikes,1);assert(state.until>Date.now()+119000)
+  const client=f.web.client(),chat=await client.create(AbortSignal.timeout(1000))
+  await assert.rejects(collect(client.generate(chat,null,'fixture prompt',true,AbortSignal.timeout(1000))),e=>e.code==='RATE_LIMIT'&&e.details.accepted===false&&e.details.retryAfterMs===120000)
  }finally{await f.close()}
 })

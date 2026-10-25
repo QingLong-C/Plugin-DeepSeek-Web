@@ -428,3 +428,23 @@ test('native compaction ignores normal JSON output and preserves the pending one
   assert.deepEqual(await f.adapter.policy(f.agent.id),state)
  }finally{await f.close()}
 })
+
+
+test('native summary rate rejection waits and retries only the original summary before one checkpoint', {timeout:20000},async()=>{
+ const f=await harness({count:200})
+ try{
+  await f.ask('Original source '+ 'facts '.repeat(600))
+  f.web.completion=c=>{
+   if(c.editing&&f.web.edits.length===1){
+    f.web.chats.set(c.body.chat_session_id,f.web.chats.get(c.body.chat_session_id).filter(m=>![c.requestId,c.responseId].includes(m.message_id)))
+    return sse(c.ready+frame({type:'error',clear_response:true,finish_reason:'rate_limit_reached'},'hint'))
+   }
+   return sse(c.ready+frame(snapshot(c.text)))
+  }
+  assert(await f.ctx.compaction.compactNow(f.agent,AbortSignal.timeout(5000)))
+  assert.equal(f.web.generations.length,1);assert.equal(f.web.edits.length,2)
+  assert.deepEqual(f.web.edits[0],f.web.edits[1])
+  assert.equal(f.agent.session.snapshotEvents().filter(e=>e.type==='compaction/summary').length,1)
+  assert.equal(f.web.stops.length,0)
+ }finally{await f.close()}
+})

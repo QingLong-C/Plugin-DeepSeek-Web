@@ -14,7 +14,7 @@ import{TokenFreeAdapter,PROVIDER,MODEL}from'../lib/dsh/adapter.js'
 import{ToolPolicyBridge}from'../lib/dsh/tool-policy.js'
 import{LocalStore}from'../lib/local/store.js'
 import{DshBoundary}from'../lib/dsh/native.js'
-import{setup,tool,payload}from'./helpers/fixture.mjs'
+import{setup,tool,payload,frame,snapshot,sse}from'./helpers/fixture.mjs'
 const definition=(name=tool.name,description='Initial schema')=>defineTool({name,description,parameters:{},output:{schema:{type:'string'},render:(_,v)=>[{type:'text',text:v}]},execute:async()=> 'fixture result'})
 const message=text=>createUserMessage({content:[{type:'text',text}],source:{kind:'user'}})
 async function harness(){
@@ -30,6 +30,29 @@ async function harness(){
  const ask=async(a,text)=>{a.followup(message(text));await a.whenIdle();await adapter.reconcile(a.id)}
  return{...f,ctx,adapter,get bridge(){return bridge},native,create,ask,unload:()=>layer.dispose(),reload:load,close:async()=>{await adapter.dispose();await ctx.fiber.dispose();await f.close()}}
 }
+
+test('actual native task waits through two official rejections after an executed inspection, without repeating the tool', {timeout:15000},async()=>{
+ const f=await harness();let executions=0,limits=0
+ const remove=f.ctx.tools.register({...definition(),execute:async()=>{executions++;return 'Artifact already exists and inspection passed'}})
+ try{
+  const a=await f.create('rate-continue-native')
+  f.web.answer=p=>p.messages.some(m=>m.role==='tool')?{protocol_version:1,request_id:p.request_id,kind:'final',text:'Verified the existing artifact once'}:{protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:tool.name,arguments:{}}]}
+  f.web.completion=c=>{
+   if(payload(c.body.prompt).messages.some(m=>m.role==='tool')&&limits++<2){
+    f.web.chats.set(c.body.chat_session_id,f.web.chats.get(c.body.chat_session_id).filter(m=>![c.requestId,c.responseId].includes(m.message_id)))
+    return sse(c.ready+frame({type:'error',clear_response:true,finish_reason:'rate_limit_reached'},'hint'))
+   }
+   return sse(c.ready+frame(snapshot(c.text)))
+  }
+  await f.ask(a,'Inspect the existing artifact; do not download anything')
+  const events=a.session.snapshotEvents()
+  assert.equal(executions,1);assert.equal(events.filter(e=>e.type==='tool/call').length,1);assert.equal(events.filter(e=>e.type==='tool/result').length,1)
+  assert.equal(events.filter(e=>e.type==='turn/start').length,1);assert.equal(events.findLast(e=>e.type==='turn/end').data.reason.kind,'completed')
+  assert.equal(f.web.generations.length,4);assert.equal(new Set(f.web.generations.slice(1).map(g=>g.prompt)).size,1)
+  assert.equal(new Set(f.web.generations.slice(1).map(g=>g.parent_message_id)).size,1)
+  assert.equal(events.filter(e=>e.type==='assistant/message').length,2);assert.equal((await f.adapter.inspect(a.id)).pending,undefined)
+ }finally{remove();await f.close()}
+})
 
 test('native guard denies a definition replaced while approval waits; another session executes concurrently and one-shot stays consumed', {timeout:15000},async()=>{
  const f=await harness();let approve,waiting,runs=0
