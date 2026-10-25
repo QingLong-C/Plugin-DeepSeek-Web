@@ -260,7 +260,7 @@ test('public Gateway rejects non-owner management and has no credential-returnin
     Object.defineProperty(remoteContext, 'invocation', { value: { peer: { principal: { kind: 'guest' } } } })
     const remote = Object.create(gateway)
     Object.defineProperty(remote, 'ctx', { value: remoteContext })
-    for (const method of ['status', 'login', 'restore', 'cancel', 'logout', 'operationStatus', 'verifyPending', 'stopPending', 'cancelSummary', 'rebuild', 'inspect', 'usage', 'usageReport']) {
+    for (const method of ['status', 'login', 'restore', 'cancel', 'logout', 'operationStatus', 'verifyPending', 'stopPending', 'cancelSummary', 'rebuild', 'inspect', 'usage']) {
       await assert.rejects(async () => remote[method](), error => error.code === 'tokenfree/owner-required')
     }
     assert.equal(calls, 0)

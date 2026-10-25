@@ -74,13 +74,13 @@ test('built DSH client bundle mounts its Remote namespace and contributes a disp
     get: name => services[name],
     remote: { tokenfree: remote, session: { selectModel: async request => { selections.push(request); projection.next = request; return { ok: true, value: { selected: request } } } }, $mount: async info => {
       mounted++; assert.equal(info.package, 'dsh-tokenfree')
-      assert.deepEqual(Array.from(info.descriptors, method => method.method).sort(), ['cancel', 'cancelSummary', 'defaultModel', 'inspect', 'login', 'logout', 'operationStatus', 'policy', 'rebuild', 'restore', 'setPolicy', 'status', 'stopPending', 'usage', 'usageReport', 'useDefault', 'verifyPending'])
+      assert.deepEqual(Array.from(info.descriptors, method => method.method).sort(), ['cancel', 'cancelSummary', 'defaultModel', 'inspect', 'login', 'logout', 'operationStatus', 'policy', 'rebuild', 'restore', 'setPolicy', 'status', 'stopPending', 'usage', 'useDefault', 'verifyPending'])
       return async () => { unmounted++ }
     } },
     slots: {
       inject: (name, callback) => {
-        // This settings-only host has no Chat or main declaration; its pending injection stays inactive.
-        if (name === 'conversation.chat.node' || name === 'main') return () => {}
+        // This settings-only host has no Chat declaration; its pending injection stays inactive.
+        if (name === 'conversation.chat.node') return () => {}
         assert.equal(name, 'settings.section'); handlers.push(callback()); return () => {}
       },
       register: (entry, component) => { registered++; assert.equal(entry.id, 'dsh-tokenfree:account'); nativeActions = entry.inject().actions; assert.equal(typeof component, 'function'); return () => {} },
