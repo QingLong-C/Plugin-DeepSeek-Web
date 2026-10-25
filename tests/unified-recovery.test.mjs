@@ -162,13 +162,13 @@ test('one controller owns admission across failure stages and excludes transport
 })
 
 test('every recovery strategy preserves cancellation, preparation rejection, same-response resume and native commit boundaries',async()=>{
- for(const strategy of ['wrapper','arguments','protocol-tool','protocol-final','output','choice'])for(const scenario of ['cancel','reject','resume','commit']){
+ for(const strategy of ['envelope','arguments','protocol-tool','protocol-final','output','choice'])for(const scenario of ['cancel','reject','resume','commit']){
   const f=await setup(),a=adapter(f),o=options(),controller=new AbortController(),id=`${strategy}-${scenario}`;o.sessionId=id;o.signal=controller.signal;f.native.begin(id)
   if(strategy==='protocol-final')o.tools=[]
   if(strategy==='choice')await a.setPolicy(id,{tools:{mode:'required'},output:{type:'text'}})
   if(strategy==='output')await a.setPolicy(id,{tools:{mode:'none'},output:{type:'json'}})
   const corrected=p=>strategy==='protocol-final'||strategy==='output'?{protocol_version:1,request_id:p.request_id,kind:'final',text:strategy==='output'?'2':'verified answer'}:valid(p)
-  f.web.answer=(p,_,n)=>n>1?corrected(p):strategy==='wrapper'?{kind:'tool',calls:valid(p).calls}:strategy==='arguments'?{...valid(p),calls:[{name:tool.name,arguments:{unexpected:true}}]}:strategy==='protocol-tool'?'<｜｜DSML｜｜ calls><broken/>':strategy==='output'?{...corrected(p),text:'bad JSON'}:strategy==='choice'?{protocol_version:1,request_id:p.request_id,kind:'final',text:'no tools'}:'broken'
+  f.web.answer=(p,_,n)=>n>1?corrected(p):strategy==='envelope'?{kind:'tool',calls:[]}:strategy==='arguments'?{...valid(p),calls:[{name:tool.name,arguments:{unexpected:true}}]}:strategy==='protocol-tool'?'<｜｜DSML｜｜ calls><broken/>':strategy==='output'?{...corrected(p),text:'bad JSON'}:strategy==='choice'?{protocol_version:1,request_id:p.request_id,kind:'final',text:'no tools'}:'broken'
   const original=f.web.fetch;let preparations=0
   if(['cancel','reject'].includes(scenario))f.web.fetch=async(url,opts)=>{
    if(url.endsWith('/create_pow_challenge')&&++preparations===2){if(scenario==='cancel'){controller.abort();throw new DOMException('cancelled','AbortError')}return new Response('',{status:401})}return original(url,opts)

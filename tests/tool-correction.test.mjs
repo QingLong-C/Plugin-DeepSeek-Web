@@ -52,13 +52,16 @@ test('correction cannot change a valid call, tool names, order/count, or turn th
  }
 })
 
-test('missing wrapper and invalid parameters share the same single correction budget',async()=>{
+test('missing metadata neither spends nor bypasses the single argument correction budget',async()=>{
  for(const missingFirst of [true,false]){
   const f=await setup(),a=adapterFor(f)
-  f.web.answer=(p,_,n)=>n===1?(missingFirst?{kind:'tool',calls:[calls()[0]]}:answer(p,[calls()[1]]))
-   :missingFirst?answer(p,[calls()[1]]):{kind:'tool',calls:[calls()[0]]}
-  try{await assert.rejects(()=>collect(a.stream(opts())));assert.equal(f.web.generations.length,2)}finally{await a.dispose();await f.close()}
+  f.web.answer=(p,_,n)=>n===1?(missingFirst?{kind:'tool',calls:[calls()[1]]}:answer(p,[calls()[1]]))
+   :missingFirst?answer(p,[calls()[0]]):{kind:'tool',calls:[calls()[0]]}
+  try{const chunks=await collect(a.stream(opts()));assert.equal(f.web.generations.length,2);assert.deepEqual(chunks.filter(c=>c.block?.type==='tool-call').map(c=>JSON.parse(c.block.arguments)),[calls()[0].arguments])}finally{await a.dispose();await f.close()}
  }
+ const f=await setup(),a=adapterFor(f)
+ f.web.answer=()=>({kind:'tool',calls:[calls()[1]]})
+ try{await assert.rejects(()=>collect(a.stream(opts())),e=>e.code==='INVALID_TOOL_CALL');assert.equal(f.web.generations.length,2)}finally{await a.dispose();await f.close()}
 })
 
 test('missing fields, wrong types and schema violations get one model correction without local coercion',async()=>{

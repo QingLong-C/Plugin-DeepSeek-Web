@@ -321,7 +321,7 @@ export class SessionEngine {
       await this.store.commit(op.sessionKey, op.id, { ...session, needsRebase: true })
     } finally { await release() }
   }
-  async *run(input: ModelInput, accountKey: string, client: WebTransport, signal: AbortSignal, validate: (text: string, id: string, localRepair?:()=>void) => Block[], id = randomUUID(), summary?: CompactionAnchor, expectedEpoch?: number, timeoutMs?: number): AsyncIterable<ModelEvent> {
+  async *run(input: ModelInput, accountKey: string, client: WebTransport, signal: AbortSignal, validate: (text: string, id: string, localRepair?:(kind?: RecoverySolution)=>void) => Block[], id = randomUUID(), summary?: CompactionAnchor, expectedEpoch?: number, timeoutMs?: number): AsyncIterable<ModelEvent> {
     const sessionKey = input.sessionId ? this.key(input.sessionId) : digest(['temporary', id])
     const release = await this.store.sessionLock(sessionKey, signal)
     let operation: ActiveOperation | undefined
@@ -507,18 +507,19 @@ export class SessionEngine {
         this.dependencies.log?.content(id, 'metrics.observed', { identity: operation.identity, count: operation.usage, source: operation.usageSource, observedAt: operation.usageObservedAt, budget: operation.budget, thinking: input.thinking })
         this.dependencies.log?.content(id, 'web.response', { formatStage: repairAttempt ? 'repair' : 'initial', text: raw })
         let blocks: Block[] | undefined
-        let localRepaired=false
+        let localRepaired: RecoverySolution | undefined
         try {
-          blocks = validate(raw, id,()=>{localRepaired=true})
+          blocks = validate(raw, id,kind=>{localRepaired=kind??'local-syntax'})
           checkRecoveryResult(operation.repair, operation.expected, input, blocks)
         } catch (error) {
+          localRepaired=undefined // A rejected normalized candidate is not a learned successful repair.
           const issue=formatIssue(error)
           if(issue)await remember(issue)
           let plan:ReturnType<typeof planRecovery>
           try {
             plan = planRecovery(error, raw, input, id, this.dependencies.maxPromptChars, validate, {
               summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair), previous: operation.repair,
-              finalPreview: streamsFinal(input.policy) && decoder.isFinal,
+              finalPreview: !operation.repair && streamsFinal(input.policy) && decoder.isFinal,
               confirmed: operation.finalStatus === 'FINISHED' && Boolean(operation.identity && operation.verifiedPath),
             })
           } catch(exhausted) {
@@ -527,17 +528,23 @@ export class SessionEngine {
             taskSignal.throwIfAborted()
             // Each candidate remains bound to the original batch/type and current schemas.
             // A secondary model receives no executor, native session identity or replay state.
+            // Corrections are never previewed. Their rejected final header must not overwrite the original intent.
+            const finalRecovery=Boolean(shown) || operation.repair.expectedKind==='final'
             const check=(text:string)=>{
               const candidate=validate(text,id)
               checkRecoveryResult(operation!.repair,operation!.expected,input,candidate)
-              if((shown || decoder?.isFinal) && candidate.some(b=>b.type==='tool-call'))throw new TokenFreeError('Final recovery cannot become a tool call.','WEB_TOOL_FORMAT')
+              if(finalRecovery && candidate.some(b=>b.type==='tool-call'))throw new TokenFreeError('Final recovery cannot become a tool call.','WEB_TOOL_FORMAT')
             }
-            const kind=(shown || decoder?.isFinal)?'final':operation.repair.expectedKind??(operation.repair.mode==='arguments'?'tool':'auto')
-            const prompt=encodeProtocolCorrection(input,id,this.dependencies.maxPromptChars,kind,{...issue,reason:error instanceof Error?error.message:'Format validation failed'},raw)
+            const kind=finalRecovery?'final':operation.repair.expectedKind??(operation.repair.mode==='arguments'?'tool':'auto')
+            const constraints=operation.repair.mode==='arguments' && operation.expected ? {
+              calls: operation.expected.filter((block):block is Extract<Block,{type:'tool-call'}>=>block.type==='tool-call').map(call=>({name:call.name,arguments:JSON.parse(call.arguments)})),
+              invalid_calls: operation.repair.invalidCalls ?? [],
+            } : undefined
+            const prompt=encodeProtocolCorrection(input,id,this.dependencies.maxPromptChars,kind,{...issue,reason:error instanceof Error?error.message:'Format validation failed'},raw,constraints)
             // The Web generation is complete; repair attempts have their own bounded timers.
             signal=taskSignal;budgetSignal=undefined
             const repaired=await this.dependencies.repairRelay({prompt,operationId:id,signal:taskSignal,validate:check})
-            taskSignal.throwIfAborted();check(repaired.text);blocks=validate(repaired.text,id)
+            taskSignal.throwIfAborted();check(repaired.text);blocks=validate(repaired.text,id,kind=>{localRepaired=kind??'local-syntax'})
             raw=repaired.text
             await this.update(operation,{repairSource:{provider:repaired.provider,model:repaired.model,candidateHash:digest(raw)}})
             repairRoute='response-protocol'
@@ -560,7 +567,10 @@ export class SessionEngine {
           if(!operation.repairSource)throw error
         }
         if(!blocks)throw new TokenFreeError('Recovery produced no validated blocks.','WEB_TOOL_FORMAT')
-        if(localRepaired)await remember({stage:'syntax',code:'WEB_TOOL_FORMAT'})
+        if(localRepaired){
+          const issue={stage:localRepaired==='local-syntax'?'syntax':'wrapper',code:'WEB_TOOL_FORMAT'}
+          await remember(issue); await remember(issue,localRepaired); issues.delete(issue.stage+':'+issue.code)
+        }
         for(const issue of issues.values())await remember(issue,repairRoute??'local-syntax')
         const textBlock = blocks.find(x => x.type === 'text')
         if (textBlock?.type === 'text' && input.stop.length && !blocks.some(x => x.type === 'tool-call')) {

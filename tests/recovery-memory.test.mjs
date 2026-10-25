@@ -75,11 +75,11 @@ test('uncorrected candidates stay pending; corrupt memory cannot authorize a cal
  }finally{await a.dispose();await f.close()}
 })
 
-test('known local repairs persist and reuse only serialization advice, never an earlier command',async()=>{
+for(const solution of ['local-syntax','contract-envelope','response-wrapper']) test(`known ${solution} repairs persist across restart without retaining earlier commands`,async()=>{
  const f=await setup(),declared={name:'inspect',description:'Inspect existing marker',parameters:{type:'object',additionalProperties:false,required:['command'],properties:{command:{type:'string'}}}}
  const create=()=>new TokenFreeAdapter({}, {store:f.store,native:f.native,credential:async()=>({token:'fixture',accountId:'fixture-owner'}),client:(_,c)=>f.web.client(f.log,c.operationId)})
  let a=create()
- f.web.answer=(p,_,n)=>JSON.stringify({protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:'inspect',arguments:{command:n===1?'FIRST_PRIVATE_COMMAND':'SECOND_PRIVATE_COMMAND'}}]})+']'
+ f.web.answer=(p,_,n)=>{const value={protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:'inspect',arguments:{command:n===1?'FIRST_PRIVATE_COMMAND':'SECOND_PRIVATE_COMMAND'}}]};if(solution==='contract-envelope'){delete value.protocol_version;delete value.request_id;delete value.kind};const raw=JSON.stringify(value);return solution==='local-syntax'?raw+']':solution==='response-wrapper'?JSON.stringify(raw):raw}
  try{
   for(const expected of ['FIRST_PRIVATE_COMMAND','SECOND_PRIVATE_COMMAND']){
    const chunks=await collect(a.stream({provider:PROVIDER,model:MODEL,messages:[{role:'user',content:[{type:'text',text:'Inspect current marker'}]}],tools:[declared]}))
@@ -88,7 +88,7 @@ test('known local repairs persist and reuse only serialization advice, never an 
   }
   assert.equal(f.web.generations.length,2);assert(f.web.generations[1].prompt.includes('DSH_LEARNED_FORMAT_RULES'))
   const records=await new RecoveryMemory(f.home).all(),entry=records[0].entries[0]
-  assert.equal(entry.status,'resolved');assert.equal(entry.occurrences,2);assert.equal(entry.solutions['local-syntax'],2)
+  assert.equal(entry.status,'resolved');assert.equal(entry.occurrences,2);assert.equal(entry.solutions[solution],2)
   const bytes=await readFile(join(f.home,'recovery-memory',records[0].scope+'.json'),'utf8');assert(!bytes.includes('PRIVATE_COMMAND'))
  }finally{await a.dispose();await f.close()}
 })

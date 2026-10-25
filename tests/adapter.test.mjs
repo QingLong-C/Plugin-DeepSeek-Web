@@ -145,26 +145,25 @@ test('malformed JSON, unknown tool, duplicate field or invalid schema never emit
   }
 })
 
-test('only complete existing intent missing protocol wrapper gets one format repair', async () => {
+test('complete existing intent missing protocol metadata normalizes without another generation', async () => {
   const f = await setup(), adapter = adapterFor(f)
   f.web.answer = (p, _, n) => n === 1 ? { kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
     : { protocol_version: 1, request_id: p.request_id, kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
   try {
     const chunks = await collect(adapter.stream({ ...base(), tools: [tool] }))
-    assert.equal(f.web.generations.length, 2)
-    assert.equal(f.web.generations[1].parent_message_id, 2)
+    assert.equal(f.web.generations.length, 1)
     assert.equal(chunks.find(x => x.type === 'block-end').block.name, tool.name)
     assert.equal(chunks.at(-1).reason.kind, 'tool-calls')
   } finally { adapter.dispose(); await f.close() }
 })
 
-test('local syntax normalization composes with the existing single wrapper repair without changing tool intent', async () => {
+test('local syntax and metadata normalization compose without changing tool intent', async () => {
   const f = await setup(), adapter = adapterFor(f)
   f.web.answer = (p, _, n) => n === 1 ? '{"kind":"tool","calls":[{"name":"read_marker","arguments":{}}]}}'
     : { protocol_version: 1, request_id: p.request_id, kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
   try {
     const chunks = await collect(adapter.stream({ ...base(), tools: [tool] }))
-    assert.equal(f.web.generations.length, 2)
+    assert.equal(f.web.generations.length, 1)
     assert.equal(chunks.filter(x => x.type === 'block-end' && x.block.type === 'tool-call').length, 1)
     assert.equal(chunks.at(-1).reason.kind, 'tool-calls')
   } finally { adapter.dispose(); await f.close() }

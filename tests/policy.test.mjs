@@ -77,7 +77,7 @@ test('one repair and same-response resume retain one-shot identity until the sin
  const f=await setup(),a=make(f),id='repair'
  try{
   await a.setPolicy(id,policy({mode:'required'}));f.native.begin(id)
-  f.web.answer=(p,_,n)=>n===1?{kind:'tool',calls:[{name:tool.name,arguments:{}}]}:{protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:tool.name,arguments:{}}]}
+  f.web.answer=(p,_,n)=>n===1?'incomplete tool protocol':{protocol_version:1,request_id:p.request_id,kind:'tool',calls:[{name:tool.name,arguments:{}}]}
   f.web.completion=({ready,text})=>sse(ready+frame(snapshot(f.web.generations.length===2?text.slice(0,-3):text,f.web.generations.length===2?'WIP':'FINISHED')))
   const chunks=await collect(a.stream(options(id)));assert.equal(f.web.generations.length,2);assert.equal(f.web.resumes.length,1);assert.equal((await a.policy(id)).tools.mode,'required');await commit(f,a,id,chunks);assert.equal((await a.policy(id)).tools.mode,'auto')
  }finally{await a.dispose();await f.close()}

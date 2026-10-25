@@ -15,7 +15,7 @@ import { DeepSeekWebClient } from '../deepseek-web/client.js'
 import { decodeResponse, modelInput, messageHash } from '../core/codec.js'
 import { allowedTools, defaultPolicy, parsePolicy, validatePolicyResult } from '../core/policy.js'
 import { SessionEngine } from '../core/session.js'
-import { TokenFreeError } from '../core/errors.js'
+import { TokenFreeError, ToolArgumentsError } from '../core/errors.js'
 import type { NativeBoundary, NativeAttempt, CompactionAnchor, WebTransport, Block, Tool, SessionPolicy } from '../core/types.js'
 import { digest, LocalStore } from '../local/store.js'
 import { failureCategory } from '../local/diagnostics.js'
@@ -251,8 +251,8 @@ export class TokenFreeAdapter extends LlmAdapter {
           this.schemas.check(tool.parameters, value)
           assertSupportedJsonSchema(sanitizeJsonSchema(tool.parameters))
           const issues = validateJsonSchemaValue(tool.parameters, value)
-          if (issues.length) throw new TokenFreeError(`Tool ${tool.name} arguments failed schema validation: ${issues[0]}`, 'INVALID_TOOL_CALL')
-        }, () => { localRepair?.(); log?.write('model.format-repair', { operationId, stage: 'local-syntax', attempt: 1 }) })
+          if (issues.length) throw new ToolArgumentsError(`Tool ${tool.name} arguments failed host schema validation.`, { path: '', rule: 'host-schema' })
+        }, kind => { localRepair?.(kind); log?.write('model.format-repair', { operationId, stage: 'local-syntax', attempt: 1 }) })
         if (input.policy) validatePolicyResult(blocks, input.policy, input.stop, (schema, value) => {
           this.schemas.check(schema, value, 'OUTPUT_SCHEMA')
           assertSupportedJsonSchema(sanitizeJsonSchema(schema))

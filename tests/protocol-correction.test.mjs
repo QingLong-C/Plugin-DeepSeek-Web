@@ -32,7 +32,7 @@ test('broken whole tool protocol regenerates once from authoritative DSH context
 })
 
 test('protocol retry stops without progress and bounds final schema refinement without invalid delivery',async()=>{
- for(const [index,second] of [broken,p=>({kind:'tool',calls:answer(p).calls}),p=>({...answer(p),calls:[{name:tool.name,arguments:{extra:true}}]})].entries()){
+ for(const [index,second] of [broken,p=>({kind:'tool',calls:[]}),p=>({...answer(p),calls:[{name:tool.name,arguments:{extra:true}}]})].entries()){
   const f=await setup(),a=adapterFor(f),chunks=[]
   f.web.answer=(p,_,n)=>n===1?broken:typeof second==='function'?second(p):second
   try{await assert.rejects(async()=>{for await(const c of a.stream(opts()))chunks.push(c)})
@@ -124,8 +124,8 @@ test('oversize protocol correction refuses before a second generation and tools-
  }
 })
 
-test('an earlier wrapper or argument correction cannot add a later protocol regeneration',async()=>{
- for(const first of [p=>({kind:'tool',calls:answer(p).calls}),p=>({...answer(p),calls:[{name:tool.name,arguments:{extra:true}}]})]){
+test('an earlier envelope or argument correction cannot add a later protocol regeneration',async()=>{
+ for(const first of [p=>({kind:'tool',calls:[]}),p=>({...answer(p),calls:[{name:tool.name,arguments:{extra:true}}]})]){
   const f=await setup(),a=adapterFor(f);f.web.answer=(p,_,n)=>n===1?first(p):broken
   try{await assert.rejects(()=>collect(a.stream(opts())));assert.equal(f.web.generations.length,2)}finally{await a.dispose();await f.close()}
  }

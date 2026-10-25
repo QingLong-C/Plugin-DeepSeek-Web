@@ -153,7 +153,7 @@ test('flush failure and mismatched native results preserve pending; retry commit
 test('format repair stays in original operation and native saved repair response becomes next parent', async () => {
   const f = await setup()
   try {
-    f.web.answer = (p, _, n) => n === 1 ? { kind: 'final', text: 'answer' } : { protocol_version: 1, request_id: p.request_id, kind: 'final', text: 'answer' }
+    f.web.answer = (p, _, n) => n === 1 ? '{"kind":"final","text":'  : { protocol_version: 1, request_id: p.request_id, kind: 'final', text: 'answer' }
     const i = input(); const a = result(await f.run(i)); const saved = f.native.save(a); await f.engine.reconcile()
     assert.equal(f.web.generations.length, 2); assert.equal(f.web.chats.size, 1)
     assert.equal(f.web.generations[1].parent_message_id, 2)
@@ -227,7 +227,7 @@ test('proven pre-submit failure clears admission without inventing a native mess
 test('repair preparation rejection retains original verified response and rebases after native settlement', async () => {
   const f = await setup(); let challenges = 0
   const original = f.web.fetch
-  f.web.answer = () => ({ kind: 'final', text: 'answer' })
+  f.web.answer = () => '{"kind":"final","text":'
   f.web.fetch = async (url, options) => url.endsWith('/create_pow_challenge') && ++challenges === 2 ? new Response('', { status: 401 }) : original(url, options)
   try {
     await assert.rejects(f.run(), error => error.code === 'AUTH')

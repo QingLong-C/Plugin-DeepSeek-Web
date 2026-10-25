@@ -22,7 +22,8 @@ const calls = (blocks: Block[]) => blocks.filter(block => block.type === 'tool-c
 
 /** One admission boundary; a second correction requires verified protocol-to-schema progress. No execution here. */
 export function planRecovery(error: unknown, raw: string, input: ModelInput, id: string, maxChars: number, validate: Validate, admission: Admission): Plan | undefined {
-  const outputFailure = error instanceof TokenFreeError && ['INVALID_TOOL_CALL', 'TOOL_CHOICE', 'OUTPUT_FORMAT', 'OUTPUT_SCHEMA'].includes(error.code)
+  const outputFailure = error instanceof TokenFreeError && (['INVALID_TOOL_CALL', 'TOOL_CHOICE', 'OUTPUT_FORMAT', 'OUTPUT_SCHEMA'].includes(error.code)
+    || admission.attempted && error.code === 'WEB_TOOL_FORMAT')
   if (!(error instanceof WebResponseFormatError) && !outputFailure) return
   if (admission.summary || !admission.confirmed) return
   const required = input.policy?.tools.mode === 'required' || input.policy?.tools.mode === 'named'

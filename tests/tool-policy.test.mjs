@@ -222,7 +222,7 @@ test('native outer dispatch cannot bypass changed inner definitions or the searc
 })
 
 
-test('external repair is invisible to healthy tasks and resumes the original native task on a fresh web context', {timeout:15000},async()=>{
+for(const failure of ['syntax','wrong-kind']) test(`external repair (${failure}) is invisible to healthy tasks and resumes the original native task on a fresh web context`, {timeout:15000},async()=>{
  let relayCalls=0
  const relay=async request=>{
   relayCalls++
@@ -236,7 +236,8 @@ test('external repair is invisible to healthy tasks and resumes the original nat
  try{
   const healthy=await f.create('relay-healthy');await f.ask(healthy,'Normal final answer');assert.equal(relayCalls,0)
   const agent=await f.create('relay-native')
-  f.web.answer=p=>p.messages.some(m=>m.role==='tool')?{protocol_version:1,request_id:p.request_id,kind:'final',text:'Continued from actual marker result'}:'broken envelope fixture'
+  f.web.answer=(p,_,n)=>p.messages.some(m=>m.role==='tool')?{protocol_version:1,request_id:p.request_id,kind:'final',text:'Continued from actual marker result'}
+    :failure==='syntax'?'broken envelope fixture':n===2?'<｜｜DSML｜｜ calls>broken tool response':{protocol_version:1,request_id:p.request_id,kind:'final',text:'Unexecuted claim'}
   await f.ask(agent,'Inspect the existing marker once')
   const events=agent.session.snapshotEvents();assert.equal(relayCalls,1);assert.equal(executed,1)
   assert.equal(events.filter(e=>e.type==='tool/call').length,1);assert.equal(events.filter(e=>e.type==='tool/result').length,1)

@@ -43,7 +43,7 @@ test('request content is complete, private, correlated, and redacts known login 
 
 test('actual wire bodies, logical SSE, rejected intent, repair and native commits are correlated without credentials', async () => {
   const f = await setup(home => new LocalDiagnostics(home, false))
-  f.web.answer = (p, _, n) => n === 1 ? { kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
+  f.web.answer = (p, _, n) => n === 1 ? 'incomplete tool protocol'
     : { protocol_version: 1, request_id: p.request_id, kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
   try {
     const events = await f.run(input(undefined, 'session-1', [tool]))

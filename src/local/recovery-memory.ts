@@ -11,6 +11,7 @@ const guides = {
   'tool-protocol': 'When tools are needed, serialize their exact available names and arguments as a tool envelope; never claim unexecuted results.',
   'response-wrapper': 'Use protocol_version=1 and copy the current request_id exactly; never reuse identifiers from older responses.',
   'final-response': 'For a final answer, put the complete answer in JSON final.text with escaped newlines; follow the current output schema.',
+  'contract-envelope': 'Emit the complete envelope with protocol_version=1, the current request_id and an explicit kind matching its calls or text.',
   'response-protocol': 'Return one complete JSON envelope under the current response_policy. Keep tool calls separate from final answers.',
 } as const
 export type RecoverySolution = keyof typeof guides
