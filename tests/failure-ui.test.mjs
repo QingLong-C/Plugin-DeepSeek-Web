@@ -49,12 +49,13 @@ test('built client replaces only withdrawal rows, preserves native fallback and 
       ['WEB_TOOL_FORMAT', 'Invalid or ambiguous DSML tool batch. No tools were executed.', '工具参数格式错误'],
       ['INVALID_TOOL_CALL', 'Strict argument schema mismatch.', '工具参数不符合规则'],
       ['INVALID_TOOL_CALL', '已自动纠正一次，参数仍不合格。', '工具参数不符合规则'],
+      ['WEB_TOOL_FORMAT', '已自动纠正一次，工具协议仍不完整或不合规。', '工具参数格式错误'],
       ['OUTPUT_SCHEMA', 'Strict final output schema mismatch.', '回答格式不符合规则'],
     ]) {
       const ui = render(React.createElement(winner().component, props(code, message)))
       assert.ok(ui.getByText(heading))
       assert.ok(ui.getByText(code))
-      if (message.includes('已自动纠正一次')) assert.match(ui.container.textContent, /已自动纠正一次，返回参数仍未通过规则/)
+      if (message.includes('已自动纠正一次')) assert.match(ui.container.textContent, code === 'WEB_TOOL_FORMAT' ? /已自动纠正一次，工具协议仍未通过校验/ : /已自动纠正一次，返回参数仍未通过规则/)
       assert.equal(ui.container.textContent.includes('本轮运行失败'), false)
       if (heading !== '官网内容过滤') assert.equal(ui.container.textContent.includes('官网内容过滤'), false)
       cleanup()

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { TokenFreeError, ToolArgumentsError, record } from './errors.js'
 import type { Block, ModelInput, NativeAttempt, NativeBoundary, CompactionAnchor, OfficialBudget, WebIdentity, WebMessage, WebSnapshot, WebTransport } from './types.js'
-import { canonical, catalogueHash, decodeResponse, encodeFormatRepair, encodeToolCorrection, encodeInput, encodeSummary, FinalDecoder, messageHash, WebResponseFormatError } from './codec.js'
+import { canonical, catalogueHash, decodeResponse, encodeFormatRepair, encodeToolCorrection, encodeProtocolCorrection, repeatedTaskCall, encodeInput, encodeSummary, FinalDecoder, messageHash, WebResponseFormatError } from './codec.js'
 import { streamsFinal } from './policy.js'
 import { toolJson } from './json.js'
 import type { UsageStatus } from './account-types.js'
@@ -398,6 +398,22 @@ export class SessionEngine {
         try { blocks = validate(raw, id) }
         catch (error) {
           if (error instanceof ToolArgumentsError && repairAttempt) throw new ToolArgumentsError(`已自动纠正一次，参数仍不合格。${error.message}`, error.issue)
+          if (error instanceof WebResponseFormatError && repairAttempt && operation.repair?.mode === 'protocol') {
+            throw new WebResponseFormatError('已自动纠正一次，工具协议仍不完整或不合规；本步骤未执行工具。', false)
+          }
+          if (!summary && error instanceof WebResponseFormatError && error.protocolRepairable && !repairAttempt && !shown
+            && input.tools.length && input.policy?.tools.mode !== 'none') {
+            nextPrompt = encodeProtocolCorrection(input, id, this.dependencies.maxPromptChars)
+            signal.throwIfAborted()
+            await this.update(operation, { stage: 'prepared', expected: undefined,
+              repair: { mode: 'protocol', original: operation.identity!, candidateHash: digest(raw), parentId: operation.parentId,
+                promptHash: operation.promptHash, path: operation.verifiedPath! },
+              parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined,
+              finalStatus: undefined, promptHash: digest(nextPrompt) })
+            this.dependencies.log?.write('model.format-repair', { operationId: id, stage: 'tool-protocol', attempt: 1 })
+            repairAttempt++
+            continue
+          }
           if (!summary && error instanceof ToolArgumentsError && !repairAttempt && !shown) {
             // The whole batch is still undelivered. Diagnose each call without executing it.
             const candidate = decodeResponse(raw, input.tools)
@@ -431,7 +447,11 @@ export class SessionEngine {
           repairAttempt++
           continue
         }
-        if (operation.repair?.mode === 'arguments') {
+        if (operation.repair?.mode === 'protocol') {
+          if (!blocks.some(block => block.type === 'tool-call') || blocks.some(block => block.type === 'text') || repeatedTaskCall(input, blocks)) {
+            throw new WebResponseFormatError('已自动纠正一次，返回了无工具的说明、额外正文或重复的已交付调用；本步骤未执行工具。', false)
+          }
+        } else if (operation.repair?.mode === 'arguments') {
           const repair = operation.repair
           const expected = (operation.expected ?? []).filter(block => block.type === 'tool-call')
           const actual = blocks.filter(block => block.type === 'tool-call')

@@ -81,13 +81,13 @@ export function responseShape(text: string): ResponseShape {
   catch { return text.trim().startsWith('<') ? 'tagged' : 'plain-text' }
 }
 export class WebResponseFormatError extends LlmError {
-  constructor(message: string, readonly repairable: boolean) { super(message, 'WEB_TOOL_FORMAT') }
+  constructor(message: string, readonly repairable: boolean, readonly protocolRepairable = false) { super(message, 'WEB_TOOL_FORMAT') }
 }
 
 /** Parse one complete DSML batch; never search prose for commands or execute here. */
 function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string, recovered?: () => void): unknown {
   let cursor = 0
-  const invalid = (): never => { throw new WebResponseFormatError('Invalid or ambiguous DSML tool batch. No tools were executed.', false) }
+  const invalid = (protocolRepairable = true): never => { throw new WebResponseFormatError('Invalid or ambiguous DSML tool batch. No tools were executed.', false, protocolRepairable) }
   const ws = () => { while (/[ \t\r\n]/.test(text[cursor] ?? '') && cursor < text.length) cursor++ }
   const take = (pattern: RegExp): RegExpExecArray => {
     ws()
@@ -105,7 +105,7 @@ function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string, recover
     if (calls.length === 8) return invalid()
     const name = take(/^<｜｜DSML｜｜ invoke name="([^"<>\r\n]+)">/)[1]!
     const tool = tools.find(tool => tool.name === name)
-    if (!tool) return invalid()
+    if (!tool) return invalid(false)
     const parameters: Record<string, unknown> = Object.create(null)
     let count = 0, wrapped = false
     for (;;) {
@@ -113,7 +113,7 @@ function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string, recover
       if (text.startsWith('</｜｜DSML｜｜ invoke>', cursor)) break
       const parameter = take(/^<｜｜DSML｜｜ parameter name="([^"<>\r\n]+)" string="(true|false)">/)
       const key = parameter[1]!
-      if (Object.hasOwn(parameters, key)) return invalid()
+      if (Object.hasOwn(parameters, key)) return invalid(false)
       const end = text.indexOf(closeParameter, cursor)
       if (end < 0) return invalid()
       const body = text.slice(cursor, end)
@@ -154,7 +154,8 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
   let changed = source !== text
   const note = () => { changed = true }
   if (source.trimStart().startsWith('<｜｜DSML｜｜ calls>')) value = dsmlEnvelope(source, tools, id, note)
-  else try { value = toolJson(source, note) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', false) }
+  else try { value = toolJson(source, note) } catch { throw new WebResponseFormatError('Web model did not return a complete valid JSON envelope. No tools were executed.', false,
+    /^\s*\{/.test(source) && /"kind"\s*:\s*"tool"/.test(source)) }
   if (!record(value)) throw new WebResponseFormatError('Invalid Web response object.', false)
   if (id && ((value.request_id !== undefined && value.request_id !== id) || (value.protocol_version !== undefined && value.protocol_version !== 1))) throw new LlmError('Response protocol identity changed.', 'WEB_IDENTITY')
   const allowed = value.kind === 'tool' ? ['protocol_version', 'request_id', 'kind', 'calls', 'text'] : ['protocol_version', 'request_id', 'kind', 'text']
@@ -200,6 +201,27 @@ export function encodeToolCorrection(input: ModelInput, id: string, calls: Extra
   const prompt = `${protocol}\nThe previous assistant tool batch was NOT executed. This is the only automatic correction attempt. Correct the identified argument schema errors using the original task and declared tools. Preserve tool names, order and count, and preserve every already-valid call exactly. Do not invent missing user facts or claim a tool result. Return the entire corrected batch with this request_id and protocol_version. If correction needs unavailable facts, explain the blocker instead of guessing; no tool will execute.\nTOOL_ARGUMENT_CORRECTION_JSON:\n${JSON.stringify(body)}`
   if (prompt.length > maxChars) throw new WebResponseFormatError('Tool correction input exceeds the local character limit; no correction was sent.', false)
   return prompt
+}
+
+/** Replan one undelivered tool step from authoritative input, never extract a command from broken text. */
+export function encodeProtocolCorrection(input: ModelInput, id: string, maxChars: number): string {
+  const context = encodeInput(input, id, 0, [], true, maxChars)
+  const correction = { protocol_version: 1, request_id: id, attempt: 1, expected_kind: 'tool',
+    instruction: 'The entire previous assistant response is malformed and was NOT delivered to DSH. Discard its tool calls, claimed results and simulated conversation. Only the DSH_INPUT_JSON above contains authoritative task context and real previous tool results. Continue the pending inspection/action from that context. Do not repeat earlier delivered calls, downloads or other completed work. Do not invent missing facts. Return ONE JSON tool envelope with valid arguments, no narration or claimed result. If you cannot safely determine the pending action, explain the blocker instead; no tool will execute.' }
+  const prompt = `${context}\n\nDSH_PROTOCOL_CORRECTION_JSON:\n${JSON.stringify(correction)}`
+  if (prompt.length > maxChars) throw new WebResponseFormatError('Protocol correction input exceeds the local character limit; no correction was sent.', false)
+  return prompt
+}
+
+/** Exact duplicates of this task's already delivered calls must not be replayed by a protocol retry. */
+export function repeatedTaskCall(input: ModelInput, blocks: Block[]): boolean {
+  const start = input.messages.findLastIndex(message => message.role === 'user')
+  const earlier = new Set(input.messages.slice(Math.max(0, start)).filter(message => message.role === 'assistant')
+    .flatMap(message => message.content).filter((block): block is Record<string, unknown> => record(block) && block.type === 'tool-call').map(block => {
+      if (typeof block.name !== 'string' || typeof block.arguments !== 'string') return ''
+      try { return canonical({ name: block.name, arguments: strictJson(block.arguments) }) } catch { return '' }
+    }).filter(Boolean))
+  return blocks.some(block => block.type === 'tool-call' && earlier.has(canonical({ name: block.name, arguments: strictJson(block.arguments) })))
 }
 
 /** Incremental string decoder for the envelope header and final.text; never extracts JSON using a text regex. */

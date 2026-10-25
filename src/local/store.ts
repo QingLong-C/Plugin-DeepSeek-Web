@@ -43,7 +43,7 @@ export interface ActiveOperation {
   finalStatus?: string
   stopRequested?: boolean
   rebase?: boolean
-  repair?: { mode?: 'arguments'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; path: { id: number; parentId: number | null; hash: string }[] }
+  repair?: { mode?: 'arguments' | 'protocol'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; path: { id: number; parentId: number | null; hash: string }[] }
   verifiedPath?: { id: number; parentId: number | null; hash: string }[]
   knownRejected?: boolean
   parentPath?: { id: number; parentId: number | null; hash: string }[]

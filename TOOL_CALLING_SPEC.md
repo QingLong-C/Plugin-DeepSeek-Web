@@ -202,3 +202,9 @@ DSH 已剪裁或卸载的模型可见结果按原生投影回传，并保留可�
 模拟测试负责确定性协议与竞态；真实文件、命令、用户交互与权限由用户手动验收，研发读取原生日志核对。没有通过对应 schema/结果类型验收的第三方工具不列为已兼容。
 
 源码依据：[当前编码与 isError 缺口](src/core/codec.ts#L29)、DSH 工具声明投影（`DSH packages/llm/llm/src/index.ts:1096`）、声明更新模式（`DSH packages/llm/llm/src/content.ts:424`）、公开 schema 校验（`DSH packages/core/tools/src/index.ts:91`）、原生执行前门控（`DSH packages/core/tools/src/index.ts:1504`）、调度与结果保存（`DSH packages/core/agent-loop/src/tool-calls.ts`）、先保存 assistant 再执行工具（`DSH packages/core/agent-loop/src/agent.ts:537`）。
+
+### 整段工具协议损坏的有界纠正
+
+`qinglong.8` 对已完成并经 history 核实、尚未交付/展示正文的损坏 DSML 或可识别 JSON 工具响应，可按真实 DSH 输入重新生成一次合法批次，不解析或执行损坏文本中的局部命令。完整未知工具、身份错误和上游过滤不进入此路径。它与外壳/参数修正共用一次额度，断流只恢复同一响应。
+
+纠正输入重新声明本次原生上下文及完整工具目录，丢弃上一回答自行生成的工具结果。结果须为无额外正文的工具批次，经过全部原始 schema、策略、目录及宿主检查；拒绝当前任务内工具名及规范化参数完全相同的已交付调用，不能宣称能识别任意语义改写的重复。持久化 `repair.mode=protocol`，准备拒绝/取消保留原响应证据，提交不明先核实。详情及验收见 [维护文档](MAINTENANCE.md#整段工具协议自动纠正)。
