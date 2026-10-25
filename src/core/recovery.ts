@@ -40,7 +40,7 @@ export function planRecovery(error: unknown, raw: string, input: ModelInput, id:
     throw new TokenFreeError(`已自动纠正${count}，${reason}；本步骤未执行工具。`, error.code)
   }
   const failure = { stage: error instanceof WebResponseFormatError ? error.stage : error.code === 'INVALID_TOOL_CALL' ? 'arguments' : error.code === 'TOOL_CHOICE' ? 'policy' : 'output', code: error.code }
-  if (finalPreview) return { attempt, prompt: encodeProtocolCorrection(input, id, maxChars, 'final', { ...failure, reason: error.message }), mode: 'protocol', expectedKind: 'final',
+  if (finalPreview) return { attempt, prompt: encodeProtocolCorrection(input, id, maxChars, 'final', { ...failure, reason: error.message }, raw), mode: 'protocol', expectedKind: 'final',
     candidateHash: digest(raw), failure, logStage: 'final-response' }
   if (error instanceof ToolArgumentsError && error.code === 'INVALID_TOOL_CALL') {
     // A complete decoded batch exists; freeze its valid calls while the model fixes invalid arguments.
@@ -74,7 +74,7 @@ export function planRecovery(error: unknown, raw: string, input: ModelInput, id:
   const final = input.policy?.tools.mode === 'none' || !input.tools.length || failure.stage === 'output'
     || error instanceof WebResponseFormatError && error.intent === 'final'
   const expectedKind = required ? 'tool' : final ? 'final' : error instanceof WebResponseFormatError && error.intent === 'tool' ? 'tool' : 'auto'
-  return { attempt, prompt: encodeProtocolCorrection(input, id, maxChars, expectedKind, { ...failure, reason: error.message }), mode: 'protocol', expectedKind,
+  return { attempt, prompt: encodeProtocolCorrection(input, id, maxChars, expectedKind, { ...failure, reason: error.message }, raw), mode: 'protocol', expectedKind,
     candidateHash: digest(raw), failure, logStage: expectedKind === 'tool' ? 'tool-protocol' : 'response-protocol' }
 }
 

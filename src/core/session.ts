@@ -12,6 +12,7 @@ import { budgetFor, metricView, pressure } from './metrics.js'
 import { digest, LocalStore } from '../local/store.js'
 import type { ActiveOperation, SessionState } from '../local/store.js'
 import type { LocalDiagnostics } from '../local/diagnostics.js'
+import {RecoveryMemory,formatIssue,withRecoveryHints,type FormatIssue,type RecoverySolution} from '../local/recovery-memory.js'
 
 export type ModelEvent = { type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'result'; blocks: Block[]; operation: ActiveOperation } | { type: 'withdraw' }
 export interface SessionDependencies { store: LocalStore; storeId: string; native?: NativeBoundary; log?: LocalDiagnostics; maxPromptChars: number }
@@ -319,7 +320,7 @@ export class SessionEngine {
       await this.store.commit(op.sessionKey, op.id, { ...session, needsRebase: true })
     } finally { await release() }
   }
-  async *run(input: ModelInput, accountKey: string, client: WebTransport, signal: AbortSignal, validate: (text: string, id: string) => Block[], id = randomUUID(), summary?: CompactionAnchor, expectedEpoch?: number, timeoutMs?: number): AsyncIterable<ModelEvent> {
+  async *run(input: ModelInput, accountKey: string, client: WebTransport, signal: AbortSignal, validate: (text: string, id: string, localRepair?:()=>void) => Block[], id = randomUUID(), summary?: CompactionAnchor, expectedEpoch?: number, timeoutMs?: number): AsyncIterable<ModelEvent> {
     const sessionKey = input.sessionId ? this.key(input.sessionId) : digest(['temporary', id])
     const release = await this.store.sessionLock(sessionKey, signal)
     let operation: ActiveOperation | undefined
@@ -330,6 +331,18 @@ export class SessionEngine {
     const revoked = new AbortController()
     signal = AbortSignal.any([signal, revoked.signal])
     const taskSignal = signal
+    const memory=new RecoveryMemory(this.store.home)
+    const memoryScope=digest(['format-memory-v1',catalogueHash(input.tools),input.policy?.tools??{mode:'auto'},input.policy?.output??{type:'text'}])
+    const issues=new Map<string,FormatIssue>()
+    let learned:RecoverySolution[]=[],repairRoute:RecoverySolution|undefined
+    const remember=async(issue:FormatIssue,solution?:RecoverySolution)=>{
+      if(summary)return
+      if(!solution)issues.set(issue.stage+':'+issue.code,issue)
+      try{
+        await memory.note(memoryScope,issue,solution,id)
+        this.dependencies.log?.write('model.format-memory',{operationId:id,stage:solution?'resolved':'pending',code:issue.code})
+      }catch{this.dependencies.log?.write('model.format-memory',{operationId:id,stage:'unavailable',code:'STATE_STORAGE'})}
+    }
     const recordedRates = new WeakSet<TokenFreeError>()
     let rateAttempt = 0
     const startBudget = () => {
@@ -386,8 +399,14 @@ export class SessionEngine {
         if (!summary && pressure(previous)) throw new TokenFreeError('Context count reached 50% of the effective budget; native TokenFree compaction must complete first.', 'COMPACTION_REQUIRED')
       }
       client.bindOperation?.(id)
-      const prompt = summary ? encodeSummary(input, id, summary.compactionId, Math.min(this.dependencies.maxPromptChars, previous?.budget?.inputCharacterLimit ?? Infinity)) : encodeInput(input, id, rebase ? 0 : previous!.prefix.length, rebase ? [] : previous!.tools,
+      let prompt = summary ? encodeSummary(input, id, summary.compactionId, Math.min(this.dependencies.maxPromptChars, previous?.budget?.inputCharacterLimit ?? Infinity)) : encodeInput(input, id, rebase ? 0 : previous!.prefix.length, rebase ? [] : previous!.tools,
         rebase || instructionHash !== previous!.instructionsHash, this.dependencies.maxPromptChars, Boolean(rebase), previous?.catalogueKnown !== false)
+      if(!summary){
+        try{learned=await memory.hints(memoryScope)}catch{this.dependencies.log?.write('model.format-memory',{operationId:id,stage:'unavailable',code:'STATE_STORAGE'})}
+        const guided=withRecoveryHints(prompt,learned,this.dependencies.maxPromptChars)
+        if(guided!==prompt)this.dependencies.log?.write('model.format-memory',{operationId:id,stage:'reuse'})
+        prompt=guided
+      }
       operation = { id, ...(summary ? { kind: 'compaction' as const, compaction: { ...summary, rootId: previous!.webPath![0]!.id, oldParentId: previous!.parentId!, oldPath: previous!.webPath! } } : {}), accountKey, epoch: expectedEpoch ?? account.epoch, sessionKey, sessionId: input.sessionId, storeId: this.dependencies.storeId,
         generation: (previous?.generation ?? 0) + (rebase && !summary ? 1 : 0), stage: 'prepared', native, parentId: summary || rebase ? null : previous!.parentId,
         chatId: summary ? previous!.chatId : rebase ? previous?.compaction?.initializingChatId : previous!.chatId, parentPath: summary || rebase ? undefined : previous!.webPath, promptHash: digest(prompt), inputHashes: hashes, instructionsHash: instructionHash, toolsHash, tools: input.tools, thinking: input.thinking,
@@ -487,8 +506,11 @@ export class SessionEngine {
         this.dependencies.log?.content(id, 'metrics.observed', { identity: operation.identity, count: operation.usage, source: operation.usageSource, observedAt: operation.usageObservedAt, budget: operation.budget, thinking: input.thinking })
         this.dependencies.log?.content(id, 'web.response', { formatStage: repairAttempt ? 'repair' : 'initial', text: raw })
         let blocks: Block[]
-        try { blocks = validate(raw, id) }
+        let localRepaired=false
+        try { blocks = validate(raw, id,()=>{localRepaired=true}) }
         catch (error) {
+          const issue=formatIssue(error)
+          if(issue)await remember(issue)
           const plan = planRecovery(error, raw, input, id, this.dependencies.maxPromptChars, validate, {
             summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair), previous: operation.repair,
             finalPreview: streamsFinal(input.policy) && decoder.isFinal,
@@ -496,7 +518,8 @@ export class SessionEngine {
           })
           if (!plan) throw error
           signal.throwIfAborted()
-          nextPrompt = plan.prompt
+          repairRoute=plan.logStage as RecoverySolution
+          nextPrompt = withRecoveryHints(plan.prompt,learned,this.dependencies.maxPromptChars)
           await this.update(operation, { stage: 'prepared', expected: plan.expected,
             repair: { attempt: plan.attempt, mode: plan.mode, invalidCalls: plan.invalidCalls, expectedKind: plan.expectedKind, failure: plan.failure,
               original: operation.identity!, candidateHash: plan.candidateHash, parentId: operation.parentId,
@@ -508,6 +531,8 @@ export class SessionEngine {
           continue
         }
         checkRecoveryResult(operation.repair, operation.expected, input, blocks)
+        if(localRepaired)await remember({stage:'syntax',code:'WEB_TOOL_FORMAT'})
+        for(const issue of issues.values())await remember(issue,repairRoute??'local-syntax')
         const textBlock = blocks.find(x => x.type === 'text')
         if (textBlock?.type === 'text' && input.stop.length && !blocks.some(x => x.type === 'tool-call')) {
           const truncated = visible(textBlock.text, input.stop, true)
@@ -522,6 +547,8 @@ export class SessionEngine {
         return
       }
     } catch (error) {
+      const issue=formatIssue(error)
+      if(issue&&!issues.has(issue.stage+':'+issue.code))await remember(issue)
       const generationTimedOut = budgetSignal?.aborted
       if (!(error instanceof TokenFreeError) || !recordedRates.has(error)) await lease?.failed(error)
       if (operation) {

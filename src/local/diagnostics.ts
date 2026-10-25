@@ -9,7 +9,7 @@ type DiagnosticEvent =
   | `plugin.config.maxPromptChars=${number}`
   | 'login.started' | 'login.waiting' | 'login.transition' | 'login.authorized' | 'login.failed' | 'login.closed' | 'login.timed-out' | 'login.cancelled'
   | 'account.login' | 'account.validating' | 'account.persisting' | 'account.connected' | 'account.failed' | 'account.cancelled' | 'account.logout' | 'account.recovering'
-  | 'model.queued' | 'model.started' | 'model.recovering' | 'model.completed' | 'model.failed' | 'model.response' | 'model.format-repair'
+  | 'model.queued' | 'model.started' | 'model.recovering' | 'model.completed' | 'model.failed' | 'model.response' | 'model.format-repair' | 'model.format-memory'
   | 'content.queued' | 'policy.updated'
   | 'metrics.observed' | 'metrics.unavailable' | 'compaction.started' | 'compaction.failed'
   | 'http.started' | 'http.completed' | 'http.failed'

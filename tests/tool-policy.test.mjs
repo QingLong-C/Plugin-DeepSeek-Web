@@ -61,6 +61,9 @@ test('native DSML root-tail recovery executes a fixture once and preserves compl
   assert.deepEqual(executed,['existing']);assert.equal(events.filter(e=>e.type==='tool/call').length,1);assert.equal(events.filter(e=>e.type==='tool/result').length,1)
   assert.equal(events.findLast(e=>e.type==='turn/end').data.reason.kind,'completed');assert.equal(f.web.generations.length,2)
   assert.equal((await f.adapter.inspect(a.id)).pending,undefined)
+  const {RecoveryMemory}=await import('../lib/local/recovery-memory.js')
+  const records=await new RecoveryMemory(f.home).all()
+  assert.equal(records.length,1);assert(records[0].entries.some(e=>e.status==='resolved'&&e.solutions['local-syntax']===1&&e.lastResolvedOperationId))
  }finally{remove();await f.close()}
 })
 
@@ -75,6 +78,9 @@ test('native execution occurs once after recovering a malformed correction respo
   assert.equal(executions,1,JSON.stringify({end:events.findLast(e=>e.type==='turn/end'),generations:f.web.generations.length}));assert.equal(events.filter(e=>e.type==='tool/call').length,1);assert.equal(events.filter(e=>e.type==='tool/result').length,1)
   assert.equal(events.findLast(e=>e.type==='turn/end').data.reason.kind,'completed');assert.equal(f.web.generations.length,4)
   assert.equal((await f.adapter.inspect(a.id)).pending,undefined)
+  const {RecoveryMemory}=await import('../lib/local/recovery-memory.js')
+  const records=await new RecoveryMemory(f.home).all()
+  assert.equal(records.length,1);assert(records[0].entries.every(e=>e.status==='resolved'&&Object.keys(e.solutions).length))
  }finally{remove();await f.close()}
 })
 

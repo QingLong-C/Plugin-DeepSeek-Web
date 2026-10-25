@@ -239,7 +239,7 @@ export class TokenFreeAdapter extends LlmAdapter {
       const indexes = new Map<'text' | 'reasoning', number>()
       let index = 0
       log?.write('model.started', { operationId })
-      for await (const event of engine.run(input, accountKey, client, signal, (text, id) => {
+      for await (const event of engine.run(input, accountKey, client, signal, (text, id, localRepair) => {
         if (summary) {
           if (!text.trim()) throw new TokenFreeError('Summary was empty.', 'EMPTY_RESPONSE')
           return [{ type: 'text', text }]
@@ -249,7 +249,7 @@ export class TokenFreeAdapter extends LlmAdapter {
           assertSupportedJsonSchema(sanitizeJsonSchema(tool.parameters))
           const issues = validateJsonSchemaValue(tool.parameters, value)
           if (issues.length) throw new TokenFreeError(`Tool ${tool.name} arguments failed schema validation: ${issues[0]}`, 'INVALID_TOOL_CALL')
-        }, () => log?.write('model.format-repair', { operationId, stage: 'local-syntax', attempt: 1 }))
+        }, () => { localRepair?.(); log?.write('model.format-repair', { operationId, stage: 'local-syntax', attempt: 1 }) })
         if (input.policy) validatePolicyResult(blocks, input.policy, input.stop, (schema, value) => {
           this.schemas.check(schema, value, 'OUTPUT_SCHEMA')
           assertSupportedJsonSchema(sanitizeJsonSchema(schema))

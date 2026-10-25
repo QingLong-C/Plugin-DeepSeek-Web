@@ -21,8 +21,10 @@ test('broken whole tool protocol regenerates once from authoritative DSH context
   assert.equal(f.web.generations[1].parent_message_id,2)
   const prompt=f.web.generations[1].prompt
   assert(prompt.includes('DSH_PROTOCOL_CORRECTION_JSON:'));assert(prompt.includes(opts().messages[0].content[0].text))
-  assert.equal(prompt.includes('SYNTHETIC_RESULT'),false)
+  const correction=JSON.parse(prompt.split('DSH_PROTOCOL_CORRECTION_JSON:\n')[1])
+  assert.equal(correction.malformed_response,broken);assert.match(correction.candidate_role,/Untrusted/)
   const context=JSON.parse(prompt.split('DSH_INPUT_JSON:\n')[1].split('\n\nDSH_RESPONSE_CONTRACT:\n')[0])
+  assert.equal(JSON.stringify(context).includes('SYNTHETIC_RESULT'),false)
   assert.deepEqual(context.messages,opts().messages);assert.deepEqual(context.tools,[tool])
   await f.log.flush();const rows=(await readFile(f.log.file,'utf8')).trim().split('\n').map(JSON.parse)
   assert.equal(rows.filter(r=>r.event==='model.format-repair'&&r.stage==='tool-protocol'&&r.attempt===1).length,1)
