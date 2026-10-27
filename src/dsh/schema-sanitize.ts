@@ -92,6 +92,12 @@ function stripNode(node: unknown): unknown {
       out[key] = stripNode(value);
     }
   }
+  // Every branch already enforces this type, so the sibling type is redundant.
+  // Removing only the duplicate declaration preserves oneOf's exact-match rule.
+  if (typeof out.type === 'string' && Array.isArray(out.oneOf) && out.oneOf.length > 0
+    && out.oneOf.every((branch) => isPlainObject(branch) && branch.type === out.type)) {
+    delete out.type;
+  }
   return out;
 }
 
