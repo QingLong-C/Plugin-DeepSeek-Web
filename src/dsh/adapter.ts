@@ -73,11 +73,11 @@ export class TokenFreeAdapter extends LlmAdapter {
   override providerInfo(provider: string) { return { id: provider, name: 'TokenFree · DeepSeek Web' } }
   override providerRetryPolicy() { return resolveRetryPolicy({ mode: 'normal', maxRetries: 0 }, 'dsh-tokenfree.retryPolicy') }
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    return [{ provider, id: MODEL, name: 'DeepSeek Web · 默认（实验）', description: '本人网页账号；持久会话与恢复；官方额度未知。', inputModalities: ['text'] }]
+    return [{ provider, id: MODEL, name: 'DeepSeek Web', description: '本人网页账号；持久会话与恢复；官方额度未知。', inputModalities: ['text'] }]
   }
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     if (model !== MODEL) throw new LlmError('TokenFree supports web-default only.', 'MODEL_UNSUPPORTED')
-    return { provider, id: model, name: 'DeepSeek Web · 默认（实验）', inputModalities: ['text'], reasoning: {
+    return { provider, id: model, name: 'DeepSeek Web', inputModalities: ['text'], reasoning: {
       efforts: [{ id: ReasoningEffortId('off'), name: '关闭' }, { id: ReasoningEffortId('web-on'), name: '官网思考' }], defaultEffort: ReasoningEffortId('web-on'),
     } }
   }

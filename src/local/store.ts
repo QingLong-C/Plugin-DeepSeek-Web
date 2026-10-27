@@ -151,7 +151,7 @@ export class LocalStore {
   }
   private async rawAccount(): Promise<AccountState> {
     const value = await readJson<AccountState>(join(this.home, 'account.json'))
-    if (!value) return { schemaVersion: 2, epoch: 0 }
+    if (value === undefined) return { schemaVersion: 2, epoch: 0 }
     if (!record(value) || value.schemaVersion !== 2 || value.active !== undefined || !integer(value.epoch)
       || (value.deviceId !== undefined && !text(value.deviceId)) || (value.accountKey !== undefined && !hash(value.accountKey))
       || (value.credentialHash !== undefined && value.credentialHash !== null && !hash(value.credentialHash))) {
@@ -173,8 +173,8 @@ export class LocalStore {
       const release = await acquireLock(join(this.home, 'locks', 'state'), AbortSignal.timeout(10_000))
       try {
         const old = await readJson<Record<string, unknown>>(join(this.home, 'account.json'))
-        if (!old || old.schemaVersion === 2) return
-        if (old.schemaVersion !== 1 || !integer(old.epoch) || (old.active !== undefined && !validOperation(old.active))) throw new TokenFreeError('Legacy state is damaged; migration stopped.', 'STATE_STORAGE')
+        if (old === undefined || record(old) && old.schemaVersion === 2) return
+        if (!record(old) || old.schemaVersion !== 1 || !integer(old.epoch) || (old.active !== undefined && !validOperation(old.active))) throw new TokenFreeError('Legacy state is damaged; migration stopped.', 'STATE_STORAGE')
         if (!(await readJson(join(this.home, 'account.v1.backup.json')))) await writeJson(join(this.home, 'account.v1.backup.json'), old)
         if (old.active) {
           const active = old.active as ActiveOperation
@@ -191,10 +191,11 @@ export class LocalStore {
     await this.prepare()
     if (!hash(key)) throw new TokenFreeError('Invalid session key.', 'STATE_STORAGE')
     const value = await readJson<SessionFile | SessionState>(join(this.home, 'sessions', `${key}.json`))
-    if (!value) return { schemaVersion: 2 }
+    if (value === undefined) return { schemaVersion: 2 }
+    if (!record(value)) throw new TokenFreeError('Damaged session envelope; it was preserved.', 'STATE_STORAGE')
     if (value.schemaVersion === 1) return { schemaVersion: 2, confirmed: value }
     if (value.schemaVersion !== 2 || !policy(value.policy) || (value.active !== undefined && (!validOperation(value.active) || value.active.sessionKey !== key))
-      || (value.confirmed !== undefined && value.confirmed.sessionKey !== key)) throw new TokenFreeError('Damaged session envelope; it was preserved.', 'STATE_STORAGE')
+      || (value.confirmed !== undefined && (!record(value.confirmed) || value.confirmed.sessionKey !== key))) throw new TokenFreeError('Damaged session envelope; it was preserved.', 'STATE_STORAGE')
     return value
   }
   private async writeSession(key: string, value: SessionFile) {

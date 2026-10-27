@@ -607,9 +607,13 @@ export class SessionEngine {
       throw error
     } finally {
       if (monitoring) clearInterval(monitoring)
-      // for-await cancellation calls return(), not catch(). The server still needs its own stop/confirmation.
-      if (operation && !operation.verifiedPath && !operation.knownRejected && ['sending', 'receiving'].includes(operation.stage)) await this.stop(operation, client)
-      try { await lease?.release() } finally { await release() }
+      try {
+        // for-await cancellation calls return(), not catch(). The server still needs its own stop/confirmation.
+        if (operation && !operation.verifiedPath && !operation.knownRejected && ['sending', 'receiving'].includes(operation.stage)) await this.stop(operation, client)
+      } finally {
+        // A failed stop journal must not strand a live account/session lock.
+        try { await lease?.release() } finally { await release() }
+      }
     }
   }
 }
