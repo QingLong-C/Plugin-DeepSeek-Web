@@ -9,6 +9,7 @@ import { acquireLock } from './lock.js'
 import { AccountRequestGate, type RequestPolicy } from './request-gate.js'
 import { readdir, rm } from 'node:fs/promises'
 import { readCredential, saveCredential, normalizeCredential, type WebCredential } from './auth.js'
+import { fileIds } from '../core/images.js'
 
 export const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export type RepairSource = {provider:string;model:string;candidateHash:string}
@@ -29,6 +30,7 @@ export interface ActiveOperation {
   identity?: WebIdentity
   parentId: number | null
   promptHash: string
+  fileIds?: string[]
   inputHashes: string[]
   instructionsHash: string
   toolsHash: string
@@ -46,7 +48,7 @@ export interface ActiveOperation {
   finalStatus?: string
   stopRequested?: boolean
   rebase?: boolean
-  repair?: { attempt?: 1 | 2; expectedKind?: 'tool' | 'final' | 'auto'; failure?: { stage: string; code: string }; mode?: 'arguments' | 'protocol'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; path: { id: number; parentId: number | null; hash: string }[] }
+  repair?: { attempt?: 1 | 2; expectedKind?: 'tool' | 'final' | 'auto'; failure?: { stage: string; code: string }; mode?: 'arguments' | 'protocol'; invalidCalls?: number[]; original: WebIdentity; candidateHash: string; parentId: number | null; promptHash: string; fileIds?: string[]; path: { id: number; parentId: number | null; hash: string }[] }
   verifiedPath?: { id: number; parentId: number | null; hash: string }[]
   rateRejected?: boolean
   knownRejected?: boolean
@@ -107,6 +109,7 @@ const repair = (v: unknown, chatId: unknown): boolean => v === undefined || (rec
   && (v.expectedKind === undefined || ['tool', 'final', 'auto'].includes(String(v.expectedKind)))
   && record(v.original) && v.original.chatId === chatId && integer(v.original.requestId) && integer(v.original.responseId)
   && hash(v.candidateHash) && hash(v.promptHash) && (v.parentId === null || integer(v.parentId))
+  && (v.fileIds === undefined || fileIds(v.fileIds))
   && Array.isArray(v.path) && v.path.length > 0 && path(v.path) && v.path.at(-1)?.id === v.original.responseId
   && (v.invalidCalls === undefined || (Array.isArray(v.invalidCalls) && v.invalidCalls.length > 0
     && v.invalidCalls.every(i => integer(i) && i < 8) && new Set(v.invalidCalls).size === v.invalidCalls.length))
@@ -119,6 +122,7 @@ function validOperation(v: unknown): boolean {
   return text(v.id) && hash(v.accountKey) && integer(v.epoch) && hash(v.sessionKey) && text(v.storeId) && integer(v.generation)
     && ['prepared', 'creating', 'sending', 'receiving', 'ready-to-deliver', 'awaiting-native', 'stopped', 'failed', 'uncertain'].includes(String(v.stage))
     && (v.parentId === null || integer(v.parentId)) && typeof v.promptHash === 'string' && hashes(v.inputHashes)
+    && (v.fileIds === undefined || fileIds(v.fileIds))
     && hash(v.instructionsHash) && hash(v.toolsHash) && tools(v.tools) && typeof v.thinking === 'boolean'
     && (v.executionTools === undefined || tools(v.executionTools)) && policy(v.policy)
     && (v.sessionId === undefined || text(v.sessionId)) && (v.chatId === undefined || text(v.chatId))

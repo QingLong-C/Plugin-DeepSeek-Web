@@ -60,5 +60,5 @@ export async function solveChallenge(challenge: Challenge, signal: AbortSignal):
     if (signal.aborted) abort()
   })
   return Buffer.from(JSON.stringify({ algorithm: challenge.algorithm, challenge: challenge.challenge, salt: challenge.salt, answer,
-    signature: challenge.signature, target_path: '/api/v0/chat/completion' })).toString('base64')
+    signature: challenge.signature, target_path: challenge.target_path ?? '/api/v0/chat/completion' })).toString('base64')
 }

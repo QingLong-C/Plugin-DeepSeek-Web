@@ -2,13 +2,14 @@
 
 让 DSH 使用你自己的 DeepSeek 网页账号完成对话、工具任务和长对话处理，无需配置 API Key。模型在 DeepSeek 服务器运行，工具由 DSH 在本机按原有权限执行。
 
-当前版本：**v1.2.3** · [下载安装包](https://github.com/QingLong-C/Plugin-TokenFree/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.3.0** · [下载安装包](https://github.com/QingLong-C/Plugin-TokenFree/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 本仓库基于 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) v0.2.0 独立维护，整合兼容性与可靠性修复，保留 MIT 许可及原作者署名。
 
 ## 项目用途
 
 - 将 DeepSeek 网页对话接入 DSH，支持原生工具审批、执行结果和会话历史。
+- 转发 DSH 图片附件到官网，支持看图问答、后续工具步骤和带图历史压缩；详见 [图片功能](IMAGES.md)。
 - 提供工具协议解析、原始参数规则校验及交付前按错误类型自动格式纠正。
 - 保存格式错误和通过校验的处理方式，重启后可复用对应格式提示；未解决问题保留待处理状态和本地日志关联。
 - 可选多模型格式修复接力：当前网页纠正失败后顺序调用配置的其他渠道，通过原始校验才继续；正常响应不调用后备模型。
@@ -52,7 +53,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.2.3.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.3.0.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。

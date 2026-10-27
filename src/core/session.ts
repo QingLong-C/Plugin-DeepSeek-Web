@@ -3,7 +3,7 @@ import type { RequestLease } from '../local/request-gate.js'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { TokenFreeError, record } from './errors.js'
-import type { Block, ModelInput, NativeAttempt, NativeBoundary, CompactionAnchor, OfficialBudget, WebIdentity, WebMessage, WebSnapshot, WebTransport } from './types.js'
+import type { Block, ModelInput, NativeAttempt, NativeBoundary, CompactionAnchor, OfficialBudget, WebIdentity, WebMessage, WebSnapshot, WebTransport, ImageRef } from './types.js'
 import { canonical, catalogueHash, encodeInput, encodeProtocolCorrection, encodeSummary, FinalDecoder, messageHash } from './codec.js'
 import { streamsFinal } from './policy.js'
 import { planRecovery, checkRecoveryResult, type RepairRelay } from './recovery.js'
@@ -13,9 +13,11 @@ import { digest, LocalStore } from '../local/store.js'
 import type { ActiveOperation, SessionState } from '../local/store.js'
 import type { LocalDiagnostics } from '../local/diagnostics.js'
 import {RecoveryMemory,formatIssue,withRecoveryHints,type FormatIssue,type RecoverySolution} from '../local/recovery-memory.js'
+import { imageReferences } from './images.js'
+import { prepareImages } from '../local/image-uploads.js'
 
 export type ModelEvent = { type: 'text'; text: string } | { type: 'reasoning'; text: string } | { type: 'result'; blocks: Block[]; operation: ActiveOperation } | { type: 'withdraw' }
-export interface SessionDependencies { repairRelay?: RepairRelay; store: LocalStore; storeId: string; native?: NativeBoundary; log?: LocalDiagnostics; maxPromptChars: number }
+export interface SessionDependencies { repairRelay?: RepairRelay; store: LocalStore; storeId: string; native?: NativeBoundary; log?: LocalDiagnostics; maxPromptChars: number; readImage?: (ref: ImageRef, signal: AbortSignal) => Promise<Uint8Array> }
 const terminal = (status: string) => ['FINISHED', 'INCOMPLETE', 'CONTENT_FILTER', 'CONTEXT_LENGTH_EXCEEDED', 'TIMEOUT', 'FAILED'].includes(status)
 const pathOf = (messages: WebMessage[], responseId: number) => {
   const map = new Map(messages.map(x => [x.id, x]))
@@ -24,7 +26,7 @@ const pathOf = (messages: WebMessage[], responseId: number) => {
   while (id !== null) {
     const message = map.get(id)
     if (!message || path.some(x => x.id === id)) throw new TokenFreeError('Web ancestor path is missing or cyclic.', 'WEB_CONTEXT_CHANGED')
-    path.unshift({ id, parentId: message.parentId, hash: digest([message.role, message.content]) })
+    path.unshift({ id, parentId: message.parentId, hash: digest(message.fileIds?.length ? [message.role, message.content, message.fileIds] : [message.role, message.content]) })
     id = message.parentId
   }
   return path
@@ -54,7 +56,7 @@ export class SessionEngine {
   private async rejectUnsubmitted(operation: ActiveOperation): Promise<void> {
     const repair = operation.repair
     if (repair) await this.update(operation, { stage: 'failed', rebase: true, identity: repair.original,
-      parentId: repair.parentId, promptHash: repair.promptHash, verifiedPath: repair.path, finalStatus: 'FINISHED' })
+      parentId: repair.parentId, promptHash: repair.promptHash, fileIds: repair.fileIds, verifiedPath: repair.path, finalStatus: 'FINISHED' })
     else await this.update(operation, { stage: 'failed', knownRejected: true })
   }
   private verify(operation: ActiveOperation, messages: WebMessage[]): WebMessage {
@@ -62,7 +64,8 @@ export class SessionEngine {
     const response = messages.find(x => x.id === identity?.responseId)
     const request = messages.find(x => x.id === identity?.requestId)
     if (!identity || !response || !request || response.role !== 'ASSISTANT' || request.role !== 'USER'
-      || response.parentId !== request.id || request.parentId !== operation.parentId || digest(request.content) !== operation.promptHash) {
+      || response.parentId !== request.id || request.parentId !== operation.parentId || digest(request.content) !== operation.promptHash
+      || operation.fileIds !== undefined && canonical(request.fileIds ?? []) !== canonical(operation.fileIds)) {
       throw new TokenFreeError('Web response or submitted input does not match this operation.', 'WEB_IDENTITY')
     }
     if (operation.parentId !== null && operation.parentPath && canonical(pathOf(messages, operation.parentId)) !== canonical(operation.parentPath)) {
@@ -79,7 +82,8 @@ export class SessionEngine {
   private async discover(operation: ActiveOperation, client: WebTransport, signal: AbortSignal): Promise<void> {
     if (!operation.chatId) throw new TokenFreeError('Chat creation outcome is unknown. It was not repeated.', 'PENDING_OPERATION')
     const messages = await client.history(operation.chatId, signal)
-    const requests = messages.filter(x => x.role === 'USER' && x.parentId === operation.parentId && digest(x.content) === operation.promptHash)
+    const requests = messages.filter(x => x.role === 'USER' && x.parentId === operation.parentId && digest(x.content) === operation.promptHash
+      && (operation.fileIds === undefined || canonical(x.fileIds ?? []) === canonical(operation.fileIds)))
     if (requests.length !== 1) throw new TokenFreeError('Request acceptance is not uniquely provable. No completion was repeated.', 'PENDING_OPERATION')
     const responses = messages.filter(x => x.role === 'ASSISTANT' && x.parentId === requests[0]!.id)
     if (responses.length !== 1) throw new TokenFreeError('Response identity is not uniquely provable.', 'PENDING_OPERATION')
@@ -400,8 +404,14 @@ export class SessionEngine {
         if (!summary && pressure(previous)) throw new TokenFreeError('Context count reached 50% of the effective budget; native TokenFree compaction must complete first.', 'COMPACTION_REQUIRED')
       }
       client.bindOperation?.(id)
-      let prompt = summary ? encodeSummary(input, id, summary.compactionId, Math.min(this.dependencies.maxPromptChars, previous?.budget?.inputCharacterLimit ?? Infinity)) : encodeInput(input, id, rebase ? 0 : previous!.prefix.length, rebase ? [] : previous!.tools,
-        rebase || instructionHash !== previous!.instructionsHash, this.dependencies.maxPromptChars, Boolean(rebase), previous?.catalogueKnown !== false)
+      const imageRefs = imageReferences(summary || rebase ? input.messages : input.messages.slice(previous!.prefix.length))
+      const makePrompt = (files: ReadonlyMap<string, string>) => summary ? encodeSummary(input, id, summary.compactionId, Math.min(this.dependencies.maxPromptChars, previous?.budget?.inputCharacterLimit ?? Infinity), files) : encodeInput(input, id, rebase ? 0 : previous!.prefix.length, rebase ? [] : previous!.tools,
+        rebase || instructionHash !== previous!.instructionsHash, this.dependencies.maxPromptChars, Boolean(rebase), previous?.catalogueKnown !== false, files)
+      // Bound the serialized text before uploading any image; real ids cannot exceed this placeholder.
+      makePrompt(new Map(imageRefs.map(ref => [ref.attachmentId, 'file-' + 'x'.repeat(128)])))
+      const imageFiles = await prepareImages(this.store.home, accountKey, imageRefs, input.thinking, client, this.dependencies.readImage, lease, signal)
+      const attachments = [...imageFiles.values()]
+      let prompt = makePrompt(imageFiles)
       if(!summary){
         try{learned=await memory.hints(memoryScope)}catch{this.dependencies.log?.write('model.format-memory',{operationId:id,stage:'unavailable',code:'STATE_STORAGE'})}
         const guided=withRecoveryHints(prompt,learned,this.dependencies.maxPromptChars)
@@ -411,7 +421,7 @@ export class SessionEngine {
       operation = { id, ...(summary ? { kind: 'compaction' as const, compaction: { ...summary, rootId: previous!.webPath![0]!.id, oldParentId: previous!.parentId!, oldPath: previous!.webPath! } } : {}), accountKey, epoch: expectedEpoch ?? account.epoch, sessionKey, sessionId: input.sessionId, storeId: this.dependencies.storeId,
         generation: (previous?.generation ?? 0) + (rebase && !summary ? 1 : 0), stage: 'prepared', native, parentId: summary || rebase ? null : previous!.parentId,
         chatId: summary ? previous!.chatId : rebase ? previous?.compaction?.initializingChatId : previous!.chatId, parentPath: summary || rebase ? undefined : previous!.webPath, promptHash: digest(prompt), inputHashes: hashes, instructionsHash: instructionHash, toolsHash, tools: input.tools, thinking: input.thinking,
-        ...(!summary ? { policy: input.policy, executionTools: input.executionTools } : {}) }
+        ...(attachments.length ? { fileIds: attachments } : {}), ...(!summary ? { policy: input.policy, executionTools: input.executionTools } : {}) }
       await this.store.begin(operation)
       if ((await this.store.account()).epoch !== operation.epoch) throw new TokenFreeError('Account was revoked before submission.', 'ABORTED')
       if (summary) await this.store.amendSession(sessionKey, { compaction: { ...summary, phase: 'awaiting-checkpoint', operationId: id } }, id)
@@ -433,10 +443,11 @@ export class SessionEngine {
         await lease.submission(taskSignal)
         startBudget()
         const beforeShown = shown, beforeReasoning = shownReasoning
-        await this.update(operation, { stage: 'sending', rateRejected: false, knownRejected: undefined, identity: undefined })
+        await this.update(operation, { stage: 'sending', rateRejected: false, knownRejected: undefined, identity: undefined,
+          ...(attachments.length ? { fileIds: repairAttempt ? [] : attachments } : {}) })
         let resumes = 0
-        let source = summary ? client.editRoot!(operation.chatId!, operation.compaction!.rootId, nextPrompt, input.thinking, signal)
-          : client.generate(operation.chatId!, operation.parentId, nextPrompt, input.thinking && repairAttempt === 0, signal)
+        let source = summary ? client.editRoot!(operation.chatId!, operation.compaction!.rootId, nextPrompt, input.thinking, signal, operation.fileIds)
+          : client.generate(operation.chatId!, operation.parentId, nextPrompt, input.thinking && repairAttempt === 0, signal, operation.fileIds)
         for (;;) {
           try {
             for await (const event of source) {
@@ -557,7 +568,7 @@ export class SessionEngine {
             await this.update(operation, { stage: 'prepared', expected: plan.expected,
               repair: { attempt: plan.attempt, mode: plan.mode, invalidCalls: plan.invalidCalls, expectedKind: plan.expectedKind, failure: plan.failure,
                 original: operation.identity!, candidateHash: plan.candidateHash, parentId: operation.parentId,
-                promptHash: operation.promptHash, path: operation.verifiedPath! },
+                promptHash: operation.promptHash, fileIds: operation.fileIds, path: operation.verifiedPath! },
               parentId: operation.identity!.responseId, parentPath: operation.verifiedPath, identity: undefined, verifiedPath: undefined,
               finalStatus: undefined, promptHash: digest(nextPrompt) })
             this.dependencies.log?.write('model.format-repair', { operationId: id, stage: plan.logStage, code: plan.failure.code, attempt: plan.attempt })

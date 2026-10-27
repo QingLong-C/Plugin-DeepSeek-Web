@@ -5,7 +5,8 @@ import type { Challenge } from './pow.js'
 import { readWebEvents, WebResponseState } from './sse.js'
 import { failureCategory } from '../local/diagnostics.js'
 import type { LocalDiagnostics } from '../local/diagnostics.js'
-import type { WebEvent, WebIdentity, WebMessage, WebTransport, WebSettings } from '../core/types.js'
+import type { WebEvent, WebIdentity, WebMessage, WebTransport, WebSettings, ImageRef, WebFile } from '../core/types.js'
+import { fileId, fileIds, imageRef } from '../core/images.js'
 
 import { retryAfterMs } from '../local/request-gate.js'
 
@@ -30,8 +31,13 @@ export function webMessage(value: unknown): WebMessage {
   const fragments = value.fragments.filter(record)
   const text = (type: string) => fragments.filter(f => f.type === type).map(f => typeof f.content === 'string' ? f.content : '').join('')
   const usage = value.accumulated_token_usage
+  const attachments = fragments.filter(f => f.type === 'FILE').flatMap(f => {
+    if (!Array.isArray(f.files)) throw new LlmError('Invalid Web attachment history.', 'WEB_PROTOCOL')
+    return f.files.map(file => record(file) ? file.id : undefined)
+  })
+  if (!fileIds(attachments)) throw new LlmError('Invalid Web attachment identities.', 'WEB_PROTOCOL')
   return { id: Number(value.message_id), parentId: value.parent_id as number | null, role: value.role as 'USER' | 'ASSISTANT',
-    ...(typeof value.model_type === 'string' ? { modelType: value.model_type } : {}), content: text(value.role === 'USER' ? 'REQUEST' : 'RESPONSE'), reasoning: text('THINK'), status: value.status,
+    ...(typeof value.model_type === 'string' ? { modelType: value.model_type } : {}), ...(attachments.length ? { fileIds: attachments } : {}), content: text(value.role === 'USER' ? 'REQUEST' : 'RESPONSE'), reasoning: text('THINK'), status: value.status,
     ...(typeof usage === 'number' && Number.isSafeInteger(usage) && usage >= 0 ? { usage } : {}) }
 }
 
@@ -117,7 +123,8 @@ export class DeepSeekWebClient implements WebTransport {
     if (typeof session !== 'string' || !session.length) throw new LlmError('Web service did not create a chat session.', 'WEB_PROTOCOL')
     return session
   }
-  async *generate(chatId: string, parentId: number | null, prompt: string, thinking: boolean, signal: AbortSignal): AsyncIterable<WebEvent> {
+  async *generate(chatId: string, parentId: number | null, prompt: string, thinking: boolean, signal: AbortSignal, attachments: readonly string[] = []): AsyncIterable<WebEvent> {
+    if (!fileIds(attachments)) throw new LlmError('Invalid Web file references.', 'IMAGE_INPUT', { accepted: false })
     let proof: string
     try {
       const value = await this.json('/api/v0/chat/create_pow_challenge', { target_path: '/api/v0/chat/completion' }, signal)
@@ -126,10 +133,60 @@ export class DeepSeekWebClient implements WebTransport {
       if (error instanceof LlmError) throw new LlmError(error.message, error.code, { ...error.details, accepted: false })
       throw new LlmError('Preparation failed before completion submission.', 'POW_FAILED', { accepted: false })
     }
-    const body = { chat_session_id: chatId, parent_message_id: parentId, prompt, ref_file_ids: [], model_type: null,
+    const body = { chat_session_id: chatId, parent_message_id: parentId, prompt, ref_file_ids: [...attachments], model_type: null,
       thinking_enabled: thinking, search_enabled: false, action: null, preempt: false }
     const response = await this.request('/api/v0/chat/completion', body, signal, { accept: 'text/event-stream', 'x-ds-pow-response': proof })
     yield* readWebEvents(response, chatId, undefined, signal)
+  }
+  async uploadImage(image: { ref: ImageRef; data: Uint8Array }, thinking: boolean, signal: AbortSignal): Promise<WebFile> {
+    const ref = imageRef(image.ref)
+    if (image.data.byteLength !== ref.bytes) throw new LlmError('Image size differs from its immutable reference.', 'IMAGE_INPUT', { accepted: false })
+    const target = '/api/v0/file/upload_file'
+    let proof: string
+    try {
+      const value = await this.json('/api/v0/chat/create_pow_challenge', { target_path: target }, signal)
+      const challenge = parseChallenge(record(value) ? value.challenge : undefined)
+      if (challenge.target_path !== undefined && challenge.target_path !== target) throw new LlmError('Upload proof target differs.', 'WEB_PROTOCOL')
+      proof = await this.solve({ ...challenge, target_path: target }, signal)
+    } catch (error) {
+      if (error instanceof LlmError) throw new LlmError(error.message, error.code, { ...error.details, accepted: false })
+      throw new LlmError('Image upload preparation failed before submission.', 'POW_FAILED', { accepted: false })
+    }
+    const form = new FormData()
+    const extension = ref.mediaType === 'image/jpeg' ? 'jpg' : ref.mediaType.slice(6)
+    form.append('file', new Blob([new Uint8Array(image.data)], { type: ref.mediaType }), `dsh-image-${ref.attachmentId.slice(0, 16)}.${extension}`)
+    const headers = this.headers()
+    delete headers['content-type']
+    Object.assign(headers, { 'x-file-size': String(ref.bytes), 'x-ds-pow-response': proof, 'x-thinking-enabled': thinking ? '1' : '0', 'x-model-type': 'default' })
+    const meta = { endpoint: target, operationId: this.dependencies.operationId }, startedAt = Date.now()
+    this.dependencies.diagnostics?.write('http.started', meta)
+    let response: Response
+    try { response = await this.fetchImpl(`${ORIGIN}${target}`, { method: 'POST', headers, body: form, signal, redirect: 'error' }) }
+    catch (error) {
+      this.dependencies.diagnostics?.write('http.failed', { ...meta, elapsedMs: Date.now() - startedAt, ...failureCategory(error) })
+      if (signal.aborted) throw error
+      throw new LlmError('Image upload disconnected; it was not repeated.', 'TRANSPORT')
+    }
+    this.dependencies.diagnostics?.write('http.completed', { ...meta, elapsedMs: Date.now() - startedAt, httpStatus: response.status })
+    if (!response.ok) {
+      await response.body?.cancel()
+      const error = httpError(response.status, retryAfterMs(response.headers.get('retry-after')))
+      throw new LlmError(error.message, error.code, { ...error.details, ...([401, 402, 429].includes(response.status) ? { accepted: false as const } : {}) })
+    }
+    return this.webFile((await this.envelope(response)).value)
+  }
+  private webFile(value: unknown): WebFile {
+    if (!record(value) || !fileId(value.id) || !['PENDING', 'SUCCESS', 'FAILED'].includes(String(value.status))
+      || value.error_code !== undefined && value.error_code !== null && typeof value.error_code !== 'string') throw new LlmError('Invalid official file state.', 'WEB_PROTOCOL')
+    return { id: value.id, status: value.status as WebFile['status'], ...(value.error_code === null || typeof value.error_code === 'string' ? { errorCode: value.error_code } : {}) }
+  }
+  async files(ids: readonly string[], signal: AbortSignal): Promise<WebFile[]> {
+    if (!fileIds(ids) || !ids.length) throw new LlmError('Invalid file lookup.', 'IMAGE_INPUT')
+    const data = await this.json(`/api/v0/file/fetch_files?${new URLSearchParams({ file_ids: ids.join(',') })}`, undefined, signal)
+    if (!record(data) || !Array.isArray(data.files)) throw new LlmError('Missing official file states.', 'WEB_PROTOCOL')
+    const files = data.files.map(file => this.webFile(file))
+    if (!fileIds(files.map(f => f.id)) || files.some(f => !ids.includes(f.id))) throw new LlmError('File lookup identity differs.', 'WEB_IDENTITY')
+    return files
   }
   async *resume(identity: WebIdentity, signal: AbortSignal): AsyncIterable<WebEvent> {
     const response = await this.request('/api/v0/chat/resume_stream', { chat_session_id: identity.chatId, message_id: identity.responseId }, signal, { accept: 'text/event-stream, application/json' })
@@ -165,7 +222,8 @@ export class DeepSeekWebClient implements WebTransport {
       inputCharacterLimit: positive(x.input_character_limit),
     })) }
   }
-  async *editRoot(chatId: string, rootId: number, prompt: string, thinking: boolean, signal: AbortSignal): AsyncIterable<WebEvent> {
+  async *editRoot(chatId: string, rootId: number, prompt: string, thinking: boolean, signal: AbortSignal, attachments: readonly string[] = []): AsyncIterable<WebEvent> {
+    if (!fileIds(attachments)) throw new LlmError('Invalid summary file references.', 'IMAGE_INPUT', { accepted: false })
     let proof: string
     try {
       const value = await this.json('/api/v0/chat/create_pow_challenge', { target_path: '/api/v0/chat/completion' }, signal)
@@ -174,7 +232,7 @@ export class DeepSeekWebClient implements WebTransport {
       if (error instanceof LlmError) throw new LlmError(error.message, error.code, { ...error.details, accepted: false })
       throw new LlmError('Summary preparation failed before submission.', 'POW_FAILED', { accepted: false })
     }
-    const body = { chat_session_id: chatId, message_id: rootId, ref_file_ids: [], prompt, thinking_enabled: thinking, search_enabled: false, action: null }
+    const body = { chat_session_id: chatId, message_id: rootId, ref_file_ids: [...attachments], prompt, thinking_enabled: thinking, search_enabled: false, action: null }
     yield* readWebEvents(await this.request('/api/v0/chat/edit_message', body, signal, { accept: 'text/event-stream', 'x-ds-pow-response': proof }), chatId, undefined, signal)
   }
   async stop(identity: WebIdentity, signal: AbortSignal): Promise<void> {

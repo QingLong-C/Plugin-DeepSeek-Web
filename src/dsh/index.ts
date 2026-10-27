@@ -29,6 +29,11 @@ export function apply(ctx: Context, config: Config = {}): void {
   const tools = new ToolPolicyBridge(ctx, (sessionId, operationId) => adapter!.toolCatalogueForCall(sessionId, operationId))
   const native = new DshBoundary(ctx, attempt => adapter?.reconcile(attempt))
   adapter = new TokenFreeAdapter(config, {
+    readImage: async (ref, signal) => {
+      const attachments = ctx.get('attachments')
+      if (!attachments) throw new TokenFreeError('宿主图片附件服务不可用。', 'IMAGE_UNAVAILABLE')
+      return (await attachments.readImage(ref, signal)).data
+    },
     ...(config.repairRelay ? {repairRelay:createRepairRelay(ctx,dirname(config.credentialFile ?? defaultCredentialFile()),config.repairRelay,log)} : {}),
     credential: signal => account.credential(signal),
     signal: () => account.requestSignal(),

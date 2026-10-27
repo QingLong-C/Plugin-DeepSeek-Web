@@ -1,7 +1,7 @@
 import type {RepairRelay} from '../core/recovery.js'
 import type {RelayConfig} from './repair-relay.js'
-import { LlmAdapter, LlmError, ReasoningEffortId, ToolCallId, attributionHeaders, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, StreamChunk, ContentBlock } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, LlmError, ReasoningEffortId, ToolCallId, attributionHeaders, resolveRetryPolicy, requiredImageOffload } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmModelInfo, LlmResolvedModelInfo, StreamChunk, ContentBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import { sanitizeJsonSchema } from './schema-sanitize.js'
 import { StrictSchemas } from './strict-schema.js'
@@ -20,11 +20,13 @@ import type { NativeBoundary, NativeAttempt, CompactionAnchor, WebTransport, Blo
 import { digest, LocalStore } from '../local/store.js'
 import { failureCategory } from '../local/diagnostics.js'
 import type { LocalDiagnostics } from '../local/diagnostics.js'
+import { imageLimits } from '../core/images.js'
 
 export const PROVIDER = 'tokenfree-deepseek-web'
 export const MODEL = 'web-default'
 export interface Config { repairRelay?: RelayConfig; credentialFile?: string; timeoutMs?: number; maxPromptChars?: number; logContent?: boolean; sessionStoreId?: string }
 export interface AdapterDependencies {
+  readImage?: (ref: ImageBlock['attachment'], signal: AbortSignal) => Promise<Uint8Array>
   repairRelay?: RepairRelay
   credential?: (signal: AbortSignal) => Promise<WebCredential>
   signal?: () => AbortSignal
@@ -68,16 +70,17 @@ export class TokenFreeAdapter extends LlmAdapter {
   engine(): Promise<SessionEngine> {
     return this.enginePromise ??= (async () => new SessionEngine({ store: this.store,
       storeId: digest(this.config.sessionStoreId ? ['custom', this.config.sessionStoreId] : ['jsonl', await canonicalPath(dshHomePath('sessions'))]),
-      native: this.dependencies.native, log: this.dependencies.diagnostics, maxPromptChars: this.maxPromptChars, repairRelay: this.dependencies.repairRelay }))()
+      native: this.dependencies.native, log: this.dependencies.diagnostics, maxPromptChars: this.maxPromptChars, repairRelay: this.dependencies.repairRelay,
+      readImage: this.dependencies.readImage ? (ref, signal) => this.dependencies.readImage!(ref as ImageBlock['attachment'], signal) : undefined }))()
   }
   override providerInfo(provider: string) { return { id: provider, name: 'TokenFree · DeepSeek Web' } }
   override providerRetryPolicy() { return resolveRetryPolicy({ mode: 'normal', maxRetries: 0 }, 'dsh-tokenfree.retryPolicy') }
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    return [{ provider, id: MODEL, name: 'DeepSeek Web', description: '本人网页账号；持久会话与恢复；官方额度未知。', inputModalities: ['text'] }]
+    return [{ provider, id: MODEL, name: 'DeepSeek Web', description: '本人网页账号；持久会话与恢复；官方额度未知。', inputModalities: ['text', 'image'] }]
   }
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     if (model !== MODEL) throw new LlmError('TokenFree supports web-default only.', 'MODEL_UNSUPPORTED')
-    return { provider, id: model, name: 'DeepSeek Web', inputModalities: ['text'], reasoning: {
+    return { provider, id: model, name: 'DeepSeek Web', inputModalities: ['text', 'image'], reasoning: {
       efforts: [{ id: ReasoningEffortId('off'), name: '关闭' }, { id: ReasoningEffortId('web-on'), name: '官网思考' }], defaultEffort: ReasoningEffortId('web-on'),
     } }
   }
@@ -219,6 +222,8 @@ export class TokenFreeAdapter extends LlmAdapter {
         catch (error) { throw new TokenFreeError(error instanceof Error ? error.message : 'Unsupported tool schema.', 'UNSUPPORTED_SCHEMA') }
       }
       const input = modelInput({ ...options, tools: selected, thinking: summary?.thinking ?? options.reasoningEffort !== 'off' })
+      const offloadImages = requiredImageOffload(options.messages, { representation: 'raw', maxBytes: imageLimits.maxBytes, maxImages: imageLimits.maxImages }, block => block.attachment.bytes)
+      if (offloadImages) throw new LlmError('图片历史超过本次上传预算，需要先卸载较早图片的视觉内容。', 'IMAGE_OFFLOAD_REQUIRED', { offloadImages })
       if (input.sessionId && !summary) await this.dependencies.compactionReady?.(input.sessionId)
       if (!summary) {
         input.policy = policy

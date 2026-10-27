@@ -14,6 +14,16 @@ export interface InputMessage {
   callId?: string
   isError?: boolean
 }
+/** Host-owned immutable image reference; no path, URL or encoded bytes in journals. */
+export interface ImageRef {
+  attachmentId: string
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+  bytes: number
+  width: number
+  height: number
+  name?: string
+}
+export interface WebFile { id: string; status: 'PENDING' | 'SUCCESS' | 'FAILED'; errorCode?: string | null }
 export interface ModelInput {
   sessionId?: string
   system: string
@@ -71,16 +81,19 @@ export interface WebMessage {
   status: string
   usage?: number
   modelType?: string
+  fileIds?: string[]
 }
 export interface WebTransport {
   bindOperation?(id: string): void
   create(signal: AbortSignal): Promise<string>
-  generate(chatId: string, parentId: number | null, prompt: string, thinking: boolean, signal: AbortSignal): AsyncIterable<WebEvent>
+  generate(chatId: string, parentId: number | null, prompt: string, thinking: boolean, signal: AbortSignal, fileIds?: readonly string[]): AsyncIterable<WebEvent>
   resume(identity: WebIdentity, signal: AbortSignal): AsyncIterable<WebEvent>
   history(chatId: string, signal: AbortSignal): Promise<WebMessage[]>
   stop(identity: WebIdentity, signal: AbortSignal): Promise<void>
   settings?(deviceId: string, signal: AbortSignal): Promise<WebSettings>
-  editRoot?(chatId: string, rootId: number, prompt: string, thinking: boolean, signal: AbortSignal): AsyncIterable<WebEvent>
+  editRoot?(chatId: string, rootId: number, prompt: string, thinking: boolean, signal: AbortSignal, fileIds?: readonly string[]): AsyncIterable<WebEvent>
+  uploadImage?(image: { ref: ImageRef; data: Uint8Array }, thinking: boolean, signal: AbortSignal): Promise<WebFile>
+  files?(ids: readonly string[], signal: AbortSignal): Promise<WebFile[]>
 }
 
 export interface WebModelConfig {
