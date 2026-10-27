@@ -5,7 +5,7 @@ export const imageLimits = Object.freeze({ maxImageBytes: 10 * 1024 * 1024, maxB
 export const fileId = (id: unknown): id is string => typeof id === 'string' && /^file-[A-Za-z0-9_-]{1,128}$/.test(id)
 export const fileIds = (ids: unknown): ids is string[] => Array.isArray(ids) && ids.length <= 50 && ids.every(fileId) && new Set(ids).size === ids.length
 export function imageRef(value: unknown): ImageRef {
-  if (!record(value) || typeof value.attachmentId !== 'string' || !/^[a-f0-9]{64}$/.test(value.attachmentId)
+  if (!record(value) || typeof value.attachmentId !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(value.attachmentId)
     || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(String(value.mediaType))
     || !['bytes', 'width', 'height'].every(k => Number.isSafeInteger(value[k]) && Number(value[k]) > 0)
     || Number(value.bytes) > imageLimits.maxImageBytes || Number(value.width) > 32768 || Number(value.height) > 32768

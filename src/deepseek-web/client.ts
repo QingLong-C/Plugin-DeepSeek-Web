@@ -154,7 +154,7 @@ export class DeepSeekWebClient implements WebTransport {
     }
     const form = new FormData()
     const extension = ref.mediaType === 'image/jpeg' ? 'jpg' : ref.mediaType.slice(6)
-    form.append('file', new Blob([new Uint8Array(image.data)], { type: ref.mediaType }), `dsh-image-${ref.attachmentId.slice(0, 16)}.${extension}`)
+    form.append('file', new Blob([new Uint8Array(image.data)], { type: ref.mediaType }), `dsh-image-${ref.attachmentId.slice(7, 23)}.${extension}`)
     const headers = this.headers()
     delete headers['content-type']
     Object.assign(headers, { 'x-file-size': String(ref.bytes), 'x-ds-pow-response': proof, 'x-thinking-enabled': thinking ? '1' : '0', 'x-model-type': 'default' })
@@ -176,9 +176,9 @@ export class DeepSeekWebClient implements WebTransport {
     return this.webFile((await this.envelope(response)).value)
   }
   private webFile(value: unknown): WebFile {
-    if (!record(value) || !fileId(value.id) || !['PENDING', 'SUCCESS', 'FAILED'].includes(String(value.status))
+    if (!record(value) || !fileId(value.id) || !['PENDING', 'PARSING', 'SUCCESS', 'FAILED'].includes(String(value.status))
       || value.error_code !== undefined && value.error_code !== null && typeof value.error_code !== 'string') throw new LlmError('Invalid official file state.', 'WEB_PROTOCOL')
-    return { id: value.id, status: value.status as WebFile['status'], ...(value.error_code === null || typeof value.error_code === 'string' ? { errorCode: value.error_code } : {}) }
+    return { id: value.id, status: value.status === 'PARSING' ? 'PENDING' : value.status as WebFile['status'], ...(value.error_code === null || typeof value.error_code === 'string' ? { errorCode: value.error_code } : {}) }
   }
   async files(ids: readonly string[], signal: AbortSignal): Promise<WebFile[]> {
     if (!fileIds(ids) || !ids.length) throw new LlmError('Invalid file lookup.', 'IMAGE_INPUT')

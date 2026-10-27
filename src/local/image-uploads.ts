@@ -34,7 +34,7 @@ export async function prepareImages(home: string, accountKey: string, refs: read
     signal.throwIfAborted()
     const ref = imageRef(item)
     const data = await readImage(ref, signal)
-    if (!(data instanceof Uint8Array) || data.byteLength !== ref.bytes || createHash('sha256').update(data).digest('hex') !== ref.attachmentId || !matchesType(data, ref.mediaType)) throw new TokenFreeError('图片字节与宿主附件身份不一致；未上传。', 'IMAGE_INPUT')
+    if (!(data instanceof Uint8Array) || data.byteLength !== ref.bytes || 'sha256:' + createHash('sha256').update(data).digest('hex') !== ref.attachmentId || !matchesType(data, ref.mediaType)) throw new TokenFreeError('图片字节与宿主附件身份不一致；未上传。', 'IMAGE_INPUT')
     const path = join(home, 'image-uploads', accountKey, digest([ref.attachmentId, ref.mediaType, thinking]) + '.json')
     const state = await readJson<unknown>(path)
     if (state !== undefined && !valid(state, accountKey, ref, thinking)) throw new TokenFreeError('图片上传记录损坏，已保留原记录。', 'STATE_STORAGE')

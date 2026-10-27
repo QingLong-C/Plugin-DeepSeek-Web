@@ -7,7 +7,7 @@ import { TokenFreeAdapter, PROVIDER, MODEL } from '../lib/dsh/adapter.js'
 import { setup, collect, envelope, user } from './helpers/fixture.mjs'
 
 const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=', 'base64')
-const ref = { attachmentId: createHash('sha256').update(bytes).digest('hex'), mediaType: 'image/png', bytes: bytes.length, width: 1, height: 1, name: 'one.png' }
+const ref = { attachmentId: 'sha256:' + createHash('sha256').update(bytes).digest('hex'), mediaType: 'image/png', bytes: bytes.length, width: 1, height: 1, name: 'one.png' }
 const picture = () => ({ id: 'image-question', role: 'user', content: [{ type: 'text', text: 'Describe this image.' }, { type: 'image', attachment: ref }] })
 const options = (messages = [picture()], sessionId) => ({ provider: PROVIDER, model: MODEL, messages, ...(sessionId ? { sessionId } : {}) })
 
@@ -206,6 +206,20 @@ test('failed official image processing does not generate or keep uploading on re
   try {
     for (let i = 0; i < 2; i++) await assert.rejects(() => collect(adapter.stream(options())), e => e.code === 'IMAGE_REJECTED')
     assert.equal(wire.uploads.length, 1); assert.equal(f.web.generations.length, 0)
+  } finally { await adapter.dispose(); await f.close() }
+})
+
+test('official PARSING is an intermediate state, then the same file becomes ready', async () => {
+  const f = await setup(), wire = imageServer(f), adapter = adapterFor(f)
+  const baseFetch = f.web.fetch
+  let polls = 0
+  f.web.fetch = (url, init) => new URL(url).pathname.endsWith('/file/fetch_files') && polls++ === 0
+    ? envelope({ files: [{ id: 'file-test-1', status: 'PARSING', error_code: null }] }) : baseFetch(url, init)
+  try {
+    await collect(adapter.stream(options()))
+    assert.equal(wire.uploads.length, 1)
+    assert.equal(f.web.generations.length, 1)
+    assert(polls >= 2)
   } finally { await adapter.dispose(); await f.close() }
 })
 
