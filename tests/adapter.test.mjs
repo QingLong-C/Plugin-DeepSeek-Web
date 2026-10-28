@@ -220,3 +220,15 @@ test('account wait is cancellable and does not consume the subsequent generation
   await lease.release();const chunks=await result;assert.equal(chunks.at(-1).type,'finish');assert.equal(f.web.generations.length,1)
  }finally{await lease.release();await adapter.dispose();await f.close()}
 })
+
+test('renamed provider and model labels retain existing routing identifiers', async () => {
+  const f = await setup(), adapter = adapterFor(f)
+  try {
+    assert.deepEqual(adapter.providerInfo(PROVIDER), { id: 'tokenfree-deepseek-web', name: 'DeepSeek Web' })
+    assert.equal(PROVIDER, 'tokenfree-deepseek-web')
+    assert.equal(MODEL, 'web-default')
+    const models = await adapter.listModels(PROVIDER)
+    assert.equal(models[0].name, 'DeepSeek Web')
+    assert.equal(models[0].id, MODEL)
+  } finally { await adapter.dispose(); await f.close() }
+})

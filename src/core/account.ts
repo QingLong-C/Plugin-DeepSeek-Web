@@ -85,7 +85,7 @@ export class LocalAccount {
     this.attempt = controller
     const signal = AbortSignal.any([controller.signal, this.lifetime.signal])
     this.view = { ...this.view, state: before.state === 'connected' ? 'connected' : interactive ? 'signing-in' : 'restoring', busy: true,
-      message: interactive ? '请在 TokenFree 专用的官方窗口完成登录，成功后窗口会自动关闭。' : '正在恢复本插件保存的登录状态…' }
+      message: interactive ? '请在 DeepSeek Web 专用的官方窗口完成登录，成功后窗口会自动关闭。' : '正在恢复本插件保存的登录状态…' }
     this.running = (async () => {
       try {
         const store = new LocalStore(dirname(this.file))
@@ -113,7 +113,7 @@ export class LocalAccount {
         } else {
           this.view = before.configured && interactive ? { ...before, busy: false } : {
             state: before.configured ? 'reauth-required' : 'signed-out', configured: before.configured,
-            busy: false, message: interactive ? '登录未完成，可点击登录重试。' : '请在 TokenFree 中登录；登录状态有效时会自动恢复。',
+            busy: false, message: interactive ? '登录未完成，可点击登录重试。' : '请在 DeepSeek Web 中登录；登录状态有效时会自动恢复。',
           }
         }
       } catch (error) {
@@ -161,10 +161,10 @@ export class LocalAccount {
     this.observedCredential = credential ? digest([credential.token, credential.accountId, credential.epoch]) : undefined
     signal.throwIfAborted()
     if (!credential) {
-      if (this.interactive && this.running || this.view.state === 'reauth-required') throw new LlmError('请完成 TokenFree 登录后重试。', 'MISSING_CREDENTIAL')
+      if (this.interactive && this.running || this.view.state === 'reauth-required') throw new LlmError('请完成 DeepSeek Web 登录后重试。', 'MISSING_CREDENTIAL')
       if (!this.running) this.start(false)
       await this.wait(signal)
-      if (!this.cached || this.view.state !== 'connected') throw new LlmError('请在 DSH 设置 → TokenFree 中点击登录。', 'MISSING_CREDENTIAL')
+      if (!this.cached || this.view.state !== 'connected') throw new LlmError('请在 DSH 设置 → DeepSeek Web 中点击登录。', 'MISSING_CREDENTIAL')
       return this.cached
     }
     if (this.cached?.token === credential.token && this.cached.epoch === credential.epoch && Date.now() - (this.view.lastValidatedAt ?? 0) < 600_000) return { ...credential, accountId: this.cached.accountId }

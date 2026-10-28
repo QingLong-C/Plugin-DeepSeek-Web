@@ -1,4 +1,4 @@
-# TokenFree 职责与模块索引
+# DeepSeek Web 职责与模块索引
 
 2026-10-23。架构决定合并进 [技术方案](TECHNICAL_DESIGN.md)，本文只作导航，不再并行维护第二份架构规范。实现与未完成修复分别见 [规格状态](SPEC_STATUS.md)。
 
@@ -13,4 +13,4 @@
 | 卡片最少状态 | [账号、DSH 与官网用量](TECHNICAL_DESIGN.md#卡片的最少状态)；内部阶段不外露为配置状态 |
 | 开源发布与组合验收 | [发布与验收](TECHNICAL_DESIGN.md#6-发布与验收) |
 
-产品范围和用户已确认的决定见 [规格汇总](SPEC_STATUS.md)，官网接口事实见 [接口参考](WEB_API_REFERENCE.md)。原职责表已并入主方案：DSH 保留 Agent、工具执行、历史和压缩事务；TokenFree 只做协议、策略与网页状态适配。
+产品范围和用户已确认的决定见 [规格汇总](SPEC_STATUS.md)，官网接口事实见 [接口参考](WEB_API_REFERENCE.md)。原职责表已并入主方案：DSH 保留 Agent、工具执行、历史和压缩事务；DeepSeek Web 只做协议、策略与网页状态适配。

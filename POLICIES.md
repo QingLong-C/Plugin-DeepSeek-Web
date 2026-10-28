@@ -27,7 +27,7 @@ dsh-tokenfree policy <sessionId>
 {"tools":{"mode":"auto"},"output":{"type":"text"}}
 ```
 
-CLI 默认定位当前 DSH_HOME 的标准 sessions 存储及 TokenFree 本地目录；自定义 DSH_HOME 时使用与目标宿主相同的环境。非标准存储、显式 sessionStoreId 的宿主通过本身的 owner Remote 设置，不能用默认 CLI 猜测其身份。
+CLI 默认定位当前 DSH_HOME 的标准 sessions 存储及 DeepSeek Web 本地目录；自定义 DSH_HOME 时使用与目标宿主相同的环境。非标准存储、显式 sessionStoreId 的宿主通过本身的 owner Remote 设置，不能用默认 CLI 猜测其身份。
 
 插件已有 owner Remote 提供 `tokenfree.policy(sessionId)` 和 `tokenfree.setPolicy(sessionId, settings)`，参数与上面的 JSON 一致。返回值另带 revision，仅用于识别设置版本；写入只传 tools/output。读写不需要登录，不发送官网模型请求。会话有活动或待核实操作时拒绝修改，不等待其他 session。
 

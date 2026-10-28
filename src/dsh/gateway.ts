@@ -145,6 +145,6 @@ export class TokenFreeGateway extends TypertRemoteService {
   async logout(): Promise<AccountStatus> {
     this.owner()
     try { return await this.account.logout() }
-    catch { throw new RemoteError('gateway/internal', 'Unable to clear the local TokenFree login.', {}) }
+    catch { throw new RemoteError('gateway/internal', 'Unable to clear the local DeepSeek Web login.', {}) }
   }
 }

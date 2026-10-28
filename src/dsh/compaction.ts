@@ -143,11 +143,11 @@ export function installCompaction(ctx: Context) {
       const fiber = owner(service)
       if (fiber) { await upgrade(fiber); service = compactionFor(ctx, agent) }
     }
-    if (!(service instanceof TokenFreeCompactionEngine)) throw new TokenFreeError('TokenFree native compaction is unavailable in this DSH scope.', 'COMPACTION_UNAVAILABLE')
+    if (!(service instanceof TokenFreeCompactionEngine)) throw new TokenFreeError('DeepSeek Web native compaction is unavailable in this DSH scope.', 'COMPACTION_UNAVAILABLE')
     return service
   }
   const observe = (fiber: Fiber) => {
-    if (!disposed && mounted && !restoring.has(fiber.parent) && stock(fiber)) void upgrade(fiber).catch(error => ctx.logger.warn('TokenFree compaction initialization failed: %s', error instanceof Error ? error.message : String(error)))
+    if (!disposed && mounted && !restoring.has(fiber.parent) && stock(fiber)) void upgrade(fiber).catch(error => ctx.logger.warn('DeepSeek Web compaction initialization failed: %s', error instanceof Error ? error.message : String(error)))
   }
   const scan = () => { for (const runtime of ctx.registry.values()) for (const fiber of runtime.fibers) observe(fiber) }
   ctx.on('internal/status', fiber => {

@@ -5,7 +5,7 @@ import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
 
 type Props = ChatNodeViewProps<'turn-error'>
 
-/** Explain TokenFree rate-limit/withdrawal/format errors; other rows retain their shipped renderer. */
+/** Explain DeepSeek Web rate-limit/withdrawal/format errors; other rows retain their shipped renderer. */
 export function FailureNotice({ fallback: Fallback, ...props }: Props & { fallback: ComponentType<Props> }) {
   const { code, message } = props.node.data
   const limited = code === 'RATE_LIMIT' && /^DeepSeek (?:官网限流|Web request failed \(HTTP 429\))/.test(message)

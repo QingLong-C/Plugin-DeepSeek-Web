@@ -34,7 +34,7 @@ export function projectMessage(value: unknown): InputMessage {
       if (x.offloaded !== undefined) throw new LlmError('Invalid image offload mark.', 'IMAGE_INPUT')
       return { type: 'image', attachment: ref }
     }
-    if (!record(x) || !['text', 'tool-call', 'tool-addition', 'tool-removal'].includes(String(x.type))) throw new LlmError('TokenFree accepts text and declared tools only.', 'UNSUPPORTED_CONTENT')
+    if (!record(x) || !['text', 'tool-call', 'tool-addition', 'tool-removal'].includes(String(x.type))) throw new LlmError('DeepSeek Web accepts text and declared tools only.', 'UNSUPPORTED_CONTENT')
     return x
   })
   const source = record(value.source) ? value.source : undefined

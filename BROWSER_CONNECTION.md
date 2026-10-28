@@ -4,7 +4,7 @@
 
 ## 使用
 
-在 DSH 设置 → TokenFree 点击“登录 DeepSeek”。插件启动使用独立资料目录的 Chrome 窗口，打开 DeepSeek 官方登录页。本人完成官方登录或验证码，插件验证账号后自动关闭窗口并保存凭据；不需要复制 token。CLI 使用 `dsh-tokenfree login`。
+在 DSH 设置 → DeepSeek Web 点击“登录 DeepSeek”。插件启动使用独立资料目录的 Chrome 窗口，打开 DeepSeek 官方登录页。本人完成官方登录或验证码，插件验证账号后自动关闭窗口并保存凭据；不需要复制 token。CLI 使用 `dsh-tokenfree login`。
 
 桌面、CLI、本机 Web 共用一份本地凭据和专用浏览器资料。正常重启复用已保存凭据；官网明确拒绝认证时，尝试从专用资料静默恢复一次。仍需验证时，由用户点击重新登录，不自动弹出窗口、不循环重试，不承诺永久登录。
 

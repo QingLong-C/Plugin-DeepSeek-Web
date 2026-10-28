@@ -72,7 +72,7 @@ const css = `
 @media(max-width:600px){.dsh-tokenfree-card{padding:14px}.dsh-tokenfree-header{gap:8px}.dsh-tokenfree-header h2{font-size:13px}.dsh-tokenfree-actions{gap:6px}.dsh-tokenfree-status{gap:10px}.dsh-tokenfree-item{gap:4px}.dsh-tokenfree-item:last-child{min-width:64px}.dsh-tokenfree-label,.dsh-tokenfree-value,.dsh-tokenfree-item:last-child .dsh-tokenfree-value{font-size:11px}.dsh-tokenfree-actions button{padding:0 8px}}
 `
 
-/** All TokenFree controls stay in this single settings card. */
+/** All DeepSeek Web controls stay in this single settings card. */
 export function AccountSettings({ actions }: { actions: AccountActions }) {
   const [status, setStatus] = useState<AccountStatus>()
   const [operation, setOperation] = useState<OperationStatus>()
@@ -152,7 +152,7 @@ export function AccountSettings({ actions }: { actions: AccountActions }) {
     <style>{css}</style>
     <section className="dsh-tokenfree-card" data-testid="tokenfree-account" aria-label="DeepSeek 网页连接">
       <header className="dsh-tokenfree-header">
-        <h2><a href="https://chat.deepseek.com/" target="_blank" rel="noopener noreferrer">chat.deepseek.com</a></h2>
+        <h2><a href="https://chat.deepseek.com/" target="_blank" rel="noopener noreferrer">DeepSeek Web</a></h2>
         <div className="dsh-tokenfree-actions">
           {connected && actions.enable && selection?.available && !selected && !operation?.pending && <button data-primary title={sessionId ? '用于当前会话，并设为当前 DSH 配置默认' : '设为当前 DSH 配置默认'} disabled={disabled} onClick={() => { void run('使用', async () => {
             const id = actions.sessionId?.(); await actions.enable!(id); await refreshSelection(id)
@@ -161,13 +161,13 @@ export function AccountSettings({ actions }: { actions: AccountActions }) {
           {needsVerification && sessionId && operation?.operationId && actions.verifyPending && <button disabled={disabled} onClick={() => { void run('核实', async () => { const id = sessionId; const next = await actions.verifyPending!(id, operation.operationId!); if (alive.current && id === actions.sessionId?.()) setOperation(next) }, sessionId) }}>核实</button>}
           {needsVerification && sessionId && operation?.operationId && actions.stopPending && <button disabled={disabled} title="停止原请求并核实，不会撤销已执行的工具" onClick={() => { void run('停止并核实', async () => { const id = sessionId; const next = await actions.stopPending!(id, operation.operationId!); if (alive.current && id === actions.sessionId?.()) setOperation(next) }, sessionId) }}>停止并核实</button>}
           {status?.busy ? <button disabled={disabled} onClick={() => { void run('取消', () => accountAction(() => actions.cancel())) }}>取消</button>
-            : connected ? <button disabled={disabled} title="退出本机桌面、CLI 和 Web 的 TokenFree 连接" onClick={() => { void run('退出', () => accountAction(() => actions.logout())) }}>退出</button>
+            : connected ? <button disabled={disabled} title="退出本机桌面、CLI 和 Web 的 DeepSeek Web 连接" onClick={() => { void run('退出', () => accountAction(() => actions.logout())) }}>退出</button>
               : <button data-primary disabled={disabled} onClick={() => { void run('登录', () => accountAction(() => actions.login())) }}>登录</button>}
         </div>
       </header>
       <div className="dsh-tokenfree-status" role="status">
         <span className="dsh-tokenfree-item"><span className="dsh-tokenfree-label">账号</span><span className="dsh-tokenfree-value" data-state={status?.state} data-tone={connected ? 'good' : 'muted'} title={status?.message}>{accountText}</span></span>
-        <span className="dsh-tokenfree-item"><span className="dsh-tokenfree-label">DSH</span><span className="dsh-tokenfree-value" data-testid="tokenfree-state" data-tone={dshText === '待处理' ? 'warning' : undefined} title={error || (selected && usage?.backend && usage.backend !== 'ready' ? '当前 DSH 作用域未能初始化 TokenFree 原生压缩，请检查插件日志。' : selection?.selected && selection.defaultSelected ? '当前会话和本配置默认均已启用' : sessionId ? '当前会话与本配置默认的设置分别核实' : '当前没有会话，显示本配置默认设置')}>{dshText}</span></span>
+        <span className="dsh-tokenfree-item"><span className="dsh-tokenfree-label">DSH</span><span className="dsh-tokenfree-value" data-testid="tokenfree-state" data-tone={dshText === '待处理' ? 'warning' : undefined} title={error || (selected && usage?.backend && usage.backend !== 'ready' ? '当前 DSH 作用域未能初始化 DeepSeek Web 原生压缩，请检查插件日志。' : selection?.selected && selection.defaultSelected ? '当前会话和本配置默认均已启用' : sessionId ? '当前会话与本配置默认的设置分别核实' : '当前没有会话，显示本配置默认设置')}>{dshText}</span></span>
         <span className="dsh-tokenfree-item"><span className="dsh-tokenfree-label">用量</span><span className="dsh-tokenfree-value" data-testid="tokenfree-usage" data-tone={error || needsVerification ? 'warning' : 'muted'} title={officialTitle} aria-label={officialTitle}>{official}</span></span>
       </div>
     </section>

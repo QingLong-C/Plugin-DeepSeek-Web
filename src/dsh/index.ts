@@ -43,7 +43,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     store: new LocalStore(dirname(config.credentialFile ?? defaultCredentialFile())),
     compactionReady: async id => {
       const agent = ctx.get('agents')?.get(SessionId(id))
-      if (!agent) throw new TokenFreeError('The native TokenFree session is unavailable.', 'COMPACTION_UNAVAILABLE')
+      if (!agent) throw new TokenFreeError('The native DeepSeek Web session is unavailable.', 'COMPACTION_UNAVAILABLE')
       await compaction.ensure(agent)
     },
     toolCatalogue: (id, declared) => tools.catalogue(id, declared),

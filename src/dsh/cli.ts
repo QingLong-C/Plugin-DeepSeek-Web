@@ -141,6 +141,6 @@ async function main(): Promise<void> {
 
 main().catch(error => {
   // Never print raw fetch errors, response bodies, token values, or stacks.
-  console.error((error instanceof LlmError || error instanceof TokenFreeError) ? `${error.code}: ${error.message}` : 'TokenFree operation failed. Check README.md for local setup and authentication.')
+  console.error((error instanceof LlmError || error instanceof TokenFreeError) ? `${error.code}: ${error.message}` : 'DeepSeek Web operation failed. Check README.md for local setup and authentication.')
   process.exitCode = 1
 })

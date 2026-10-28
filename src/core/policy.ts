@@ -7,7 +7,7 @@ const exact = (value: Record<string, unknown>, keys: string[]) => Object.keys(va
 
 /** Transport-independent settings. Native schema validation is supplied by dsh/. */
 export function parsePolicy(value: unknown, schema?: (value: unknown) => void): SessionPolicy {
-  if (!record(value) || !exact(value, ['tools', 'output']) || !record(value.tools) || !record(value.output)) throw new TokenFreeError('Invalid TokenFree session policy.', 'INVALID_POLICY')
+  if (!record(value) || !exact(value, ['tools', 'output']) || !record(value.tools) || !record(value.output)) throw new TokenFreeError('Invalid DeepSeek Web session policy.', 'INVALID_POLICY')
   const tools = value.tools, output = value.output
   if (!['auto', 'none', 'required', 'named'].includes(String(tools.mode)) || !exact(tools, tools.mode === 'named' ? ['mode', 'name'] : ['mode'])
     || tools.mode === 'named' && (typeof tools.name !== 'string' || !tools.name || tools.name.length > 256)) throw new TokenFreeError('Invalid tool choice.', 'INVALID_POLICY')

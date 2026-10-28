@@ -39,7 +39,7 @@ test('settings UI handles login, automatic completion and logout without token e
     assert.equal(ui.container.querySelectorAll('.dsh-tokenfree-card').length, 1)
     assert.equal(ui.container.querySelectorAll('.dsh-tokenfree-status .dsh-tokenfree-item').length, 3)
     assert.equal(ui.container.querySelectorAll('.dsh-tokenfree-status button').length, 0)
-    assert.equal(ui.getByRole('link', { name: 'chat.deepseek.com' }).href, 'https://chat.deepseek.com/')
+    assert.equal(ui.getByRole('link', { name: 'DeepSeek Web' }).href, 'https://chat.deepseek.com/')
     assert.equal(Boolean(ui.queryByRole('button', { name: '设置 Chrome 连接组件' })), false)
     fireEvent.click(ui.getByRole('button', { name: '登录' }))
     await waitFor(() => assert.ok(ui.getByRole('button', { name: '取消' })))
@@ -83,7 +83,7 @@ test('built DSH client bundle mounts its Remote namespace and contributes a disp
         if (name === 'conversation.chat.node') return () => {}
         assert.equal(name, 'settings.section'); handlers.push(callback()); return () => {}
       },
-      register: (entry, component) => { registered++; assert.equal(entry.id, 'dsh-tokenfree:account'); nativeActions = entry.inject().actions; assert.equal(typeof component, 'function'); return () => {} },
+      register: (entry, component) => { registered++; assert.equal(entry.id, 'dsh-tokenfree:account'); assert.equal(entry.label(), 'DeepSeek Web'); nativeActions = entry.inject().actions; assert.equal(typeof component, 'function'); return () => {} },
     },
     inject: (services, callback) => { callback(ctx); return { await: async () => {}, dispose: async () => { for (const dispose of handlers) dispose() } } },
   }

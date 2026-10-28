@@ -22,7 +22,7 @@ export function isNavigationTransition(error: unknown): boolean {
 function loginFailure(error: unknown, phase: LoginPhase): LlmError {
   const message = error instanceof Error ? error.message : ''
   if (phase === 'launch' && /singleton|processsingleton|profile.*in use/i.test(message)) {
-    return new LlmError('插件登录目录正被另一个 TokenFree 窗口使用。请关闭该窗口后重试。 [LOGIN_PROFILE_BUSY]', 'LOGIN_PROFILE_BUSY')
+    return new LlmError('插件登录目录正被另一个 DeepSeek Web 窗口使用。请关闭该窗口后重试。 [LOGIN_PROFILE_BUSY]', 'LOGIN_PROFILE_BUSY')
   }
   if (phase === 'launch' && /executable.*doesn.t exist|distribution.*not found|ENOENT/i.test(message)) {
     return new LlmError('未找到已安装的 Google Chrome。 [LOGIN_CHROME_MISSING]', 'LOGIN_CHROME_MISSING')

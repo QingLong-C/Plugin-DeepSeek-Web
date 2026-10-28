@@ -1,16 +1,16 @@
 {
   "name": "dsh-tokenfree",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/QingLong-C/Plugin-TokenFree.git"
+    "url": "git+https://github.com/QingLong-C/Plugin-DeepSeek-Web.git"
   },
   "bugs": {
-    "url": "https://github.com/QingLong-C/Plugin-TokenFree/issues"
+    "url": "https://github.com/QingLong-C/Plugin-DeepSeek-Web/issues"
   },
-  "homepage": "https://github.com/QingLong-C/Plugin-TokenFree#readme",
+  "homepage": "https://github.com/QingLong-C/Plugin-DeepSeek-Web#readme",
   "packageManager": "pnpm@10.12.1",
-  "description": "TokenFree personal maintained edition with DSH schema, long-conversation and model-switch compatibility fixes.",
+  "description": "DeepSeek Web integration for DSH with image forwarding, tool protocol recovery and long-conversation support.",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

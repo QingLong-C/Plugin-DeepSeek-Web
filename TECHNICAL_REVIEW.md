@@ -1,4 +1,4 @@
-# TokenFree 技术方案 Review
+# DeepSeek Web 技术方案 Review
 
 2026-10-23。复核当前技术方案及现有源码中的共享状态、锁、取消、认证、日志和压缩接线。本次 Review 后已获授权实现，新增本地验证；本轮未发送真实模型请求。一个 npm 包、dsh/core/deepseek-web/local 四组模块保持不变。
 

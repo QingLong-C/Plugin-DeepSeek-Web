@@ -76,10 +76,10 @@ P 来自 DSH 原生 usage 锚点与表面上下文变化；没有可信锚点时
 
 现有公开 CompactionEngine 接口提供 compactIfNeeded、compactNow 和 compactRegion。BasicCompactionEngine 的自动事件处理会动态调用 compactIfNeeded，允许更换其路由策略，不必修改 DSH 源码。
 
-拟采用仅适配 TokenFree 路由触发与候选选区、保持原生事务的压缩实现：
+拟采用仅适配 DeepSeek Web 路由触发与候选选区、保持原生事务的压缩实现：
 
 1. 通过 DSH 正常配置选择一个 compaction 服务实现，不叠加两个同名服务。使用默认 compaction-basic 的入口可采用兼容其配置的派生实现；其他用户自定义后端先做兼容检查，不能覆盖其选择。
-2. 实际请求目标为 TokenFree 时，读取同账号、同 DSH session、当前网页 chat 和分支所关联的最新官方 C，以及当前模型和思考档位的官方 B。正常压力触发只比较 C 与 B×80%，不用字符或 tokenizer 估算作为触发值。配置快照与模型不匹配时不能套用。
+2. 实际请求目标为 DeepSeek Web 时，读取同账号、同 DSH session、当前网页 chat 和分支所关联的最新官方 C，以及当前模型和思考档位的官方 B。正常压力触发只比较 C 与 B×80%，不用字符或 tokenizer 估算作为触发值。配置快照与模型不匹配时不能套用。
 3. 达到门槛后，插件按表面位置保留最后一个节点及其完整工具组，用公开配对函数核实候选区间，再调用继承的 compactRegion，保留 DSH 的事务、取消、事件与 checkpoint。在当前会话锁释放或尚未持有时进入压缩，避免摘要请求等待自身的锁；不占用其他会话的生成资源。按会话并发已于 2026-10-23 实施，真实官网并发尚待验收。
 4. 编辑当前网页 chat 主链的根 USER，使用准确的原生摘要输入建立独立根分支；核实新根 parent_id=null、摘要父链及旧主链保留后才交付成功摘要。DSH 提交 checkpoint 后新建 chat，导入当前系统、工具、摘要和保留尾部；新 chat 核实成功后再进行原始步骤。当前账号短文本的官网分支与承接样本已真实通过，实际原生组合仍待实现期验收。
 5. 一次触发只推进一次已确认压缩代次；不能拿旧 chat 的 C 再循环压缩新 chat。初始化或身份不明时先恢复核实，不重复摘要和工具派发。
@@ -93,8 +93,8 @@ P 来自 DSH 原生 usage 锚点与表面上下文变化；没有可信锚点时
 
 | 范围 | 采用上述适配后的行为 |
 | --- | --- |
-| TokenFree usage 与展示 | 只用官方原值，不估算 |
-| TokenFree 主动触发 | 只比较官方 C 与门槛 T，不估算 |
+| DeepSeek Web usage 与展示 | 只用官方原值，不估算 |
+| DeepSeek Web 主动触发 | 只比较官方 C 与门槛 T，不估算 |
 | DSH 原生范围定价、摘要是否缩短、shadowedTokenCount | 现有 compactRegion 内部仍使用 tokenMeter 的估算 |
 
 用户已明确接受这条边界：usage 与触发只用官方值，范围定价、缩短判断及压缩记账继续复用原生内部逻辑。本项目不改造为全链路零估算，也不将这些内部估算当成官方 usage 展示。

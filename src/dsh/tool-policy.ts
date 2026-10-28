@@ -9,7 +9,7 @@ import type { Block, Tool } from '../core/types.js'
 const operationOf = (id: string) => /^tokenfree_([a-f0-9-]{36})_\d+$/.exec(id)?.[1]
 const changed = '工具已变化，本次调用未执行。'
 
-/** Native execution remains native. These guards can only deny a bound TokenFree call. */
+/** Native execution remains native. These guards can only deny a bound DeepSeek Web call. */
 export class ToolPolicyBridge {
   private readonly attached = new WeakSet<Agent>()
   constructor(private readonly ctx: Context, private readonly saved: (sessionId: string, operationId: string) => Promise<Tool[]>) {
@@ -59,16 +59,16 @@ export class ToolPolicyBridge {
           const call = event?.type === 'assistant/message' ? event.data.message.content.find(x => x.type === 'tool-call' && x.id === exec.rootCallId) : undefined
           if (!exec.parent && (call?.type !== 'tool-call' || call.name !== exec.name || canonical(JSON.parse(call.arguments)) !== canonical(exec.arguments))) throw new Error('call')
           bindings.set(exec.token, { tools: await this.saved(agent.id, operationId) })
-        } catch { bindings.set(exec.token, { reason: 'TokenFree 工具关联尚未核实，本次调用未执行。' }) }
+        } catch { bindings.set(exec.token, { reason: 'DeepSeek Web 工具关联尚未核实，本次调用未执行。' }) }
       }
       return next()
     })
     const guard = agent.ctx.tools.guard((exec: Readonly<ToolExecution>) => {
       if (!operationOf(exec.rootCallId)) return
-      if (!active) return retired.has(exec.rootCallId) ? 'TokenFree 已停用，本次调用未执行。' : undefined
-      if (exec.name === 'web_search') return 'TokenFree 不支持网页搜索，本次调用未执行。'
+      if (!active) return retired.has(exec.rootCallId) ? 'DeepSeek Web 已停用，本次调用未执行。' : undefined
+      if (exec.name === 'web_search') return 'DeepSeek Web 不支持网页搜索，本次调用未执行。'
       const binding = bindings.get(exec.token)
-      if (!binding?.tools) return binding?.reason ?? 'TokenFree 工具关联尚未核实，本次调用未执行。'
+      if (!binding?.tools) return binding?.reason ?? 'DeepSeek Web 工具关联尚未核实，本次调用未执行。'
       const expected = binding.tools.find(x => x.name === exec.name)
       const current = this.catalogue(agent.id).find(x => x.name === exec.name)
       return this.same(expected, current) ? undefined : changed

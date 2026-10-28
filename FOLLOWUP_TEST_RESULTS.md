@@ -4,7 +4,7 @@
 
 ## 执行方式
 
-- CLI 使用安装版自带的 DSH headless 入口，检查原生 session、JSON stdout、工具、结算及退出码；不是 TokenFree smoke。安装版运行时为 Node 24.21.0。
+- CLI 使用安装版自带的 DSH headless 入口，检查原生 session、JSON stdout、工具、结算及退出码；不是 DeepSeek Web smoke。安装版运行时为 Node 24.21.0。
 - 本机 Web 使用独立 DSH 进程及隔离 profile/session 存储，与 CLI 共享该测试存储。桌面继续使用原桌面存储。三者共用插件的同一份本人登录，没有复制凭据或新增账号。
 - 只向合成测试文件写入唯一标记。复核 CLI、Web 两个文件均为一行、标记各一次；分叉继承的旧工具记录不计为重新执行。
 - SSE/JSON 恢复测试只在专用宿主中断开发往官网的真实 TLS socket，不改响应或业务码。JSON 路径延后原 resume 请求，等官网实际完成；离线停止则临时拒绝该宿主到官网的连接，本机 Web 保持可用。利用的请求 socket 通知见 [Undici 官方文档](https://github.com/nodejs/undici/blob/main/docs/docs/api/DiagnosticsChannel.md)。没有改全机网络、证书验证、系统代理或 DSH 源码。
@@ -20,7 +20,7 @@
 | 主机崩溃 | ready 已保存后终止专用 Web，冷启动保留原操作；原生中断闭合与官网终态明确后完成收尾，新轮可用，没有自动重发问题 |
 | CLI | 正常问答、跨进程同 session 续聊、原生读写、思考期 SIGINT 和恢复均成功；正常退出码 0、stdout 仅 JSON。正文期间取消仍未单独验收 |
 | 本机 Web | 独立宿主的多轮、原生读写、流式、停止、重启与重新登录后只读工具成功。生成中刷新前端，宿主继续原请求；刷新发生在可见正文之前 |
-| 原生分叉 | 仅查看不创建网页 chat；子会话首次生成独立 bootstrap，原生继承 TokenFree 选择；父会话仍是自身 chat 的 delta，没有重新执行继承工具 |
+| 原生分叉 | 仅查看不创建网页 chat；子会话首次生成独立 bootstrap，原生继承 DeepSeek Web 选择；父会话仍是自身 chat 的 delta，没有重新执行继承工具 |
 | 官网旁支 | 在测试 chat 通过真实官网接口额外生成旁支；DSH 继续已确认 parent，旁支标记未进入实际增量，没有接管官网最新消息 |
 | 账号串行与取消 | CLI 持有生成时，Web 排队后取消，没有新 completion，也没有释放 CLI 的占用；CLI 完成后 Web 可正常使用。首次取消时机太晚的运行未计入取消覆盖 |
 | 跨入口登录/退出 | Web 退出撤销正在生成的 CLI；凭据被清除、旧生成未成功完成。用户重新登录后，桌面空闲状态同步，三端真实对话均通过。新版桌面空闲退出同步尚未单独复测，见下文 |
@@ -31,7 +31,7 @@
 
 1. **CLI JSON stdout 被诊断行污染。** 诊断改写 stderr；真实 headless stdout 全行可解析为 JSON，新增回归断言。
 2. **CLI 正常退出早于异步原生提交核实。** stream 通知继续非阻塞；在公开、可等待的 agent/turn-stopping 完成同轮结算，并串行核对及卸载收尾。真实 CLI 正常退出后 active 为空，保留原生内容核对和 public flush。
-3. **取消/崩溃没有 assistant 记录，冷启动一直暂停。** 接受原生已持久化的精确 step/end → turn/end(interrupted)，要求有效 TokenFree 路由、同 turn/step、准确 afterSeq、中间无工具或其他交付，且官网终态已另行确认。缺证据仍暂停；不写原生存储、不以“没有消息”推断安全。CLI 思考期停止及 Web 崩溃后均已恢复可用，反例有离线回归。
+3. **取消/崩溃没有 assistant 记录，冷启动一直暂停。** 接受原生已持久化的精确 step/end → turn/end(interrupted)，要求有效 DeepSeek Web 路由、同 turn/step、准确 afterSeq、中间无工具或其他交付，且官网终态已另行确认。缺证据仍暂停；不写原生存储、不以“没有消息”推断安全。CLI 思考期停止及 Web 崩溃后均已恢复可用，反例有离线回归。
 4. **取消日志误记 UNKNOWN。** 先映射 ABORTED/TIMEOUT 再记录诊断；新增排队取消日志断言，真实 Web 取消已观察到 ABORTED。
 5. **空闲界面缓存旧登录状态。** owner 状态查询只读本地凭据变动；变化时清缓存/撤销旧代次，首次真实使用再核实官网，不增加空闲联网。重新登录后的桌面空闲同步及三端真实请求成功；两个账号实例的退出同步、撤销和不复活失效凭据有离线回归。
 

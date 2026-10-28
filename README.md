@@ -1,10 +1,10 @@
-# TokenFree
+# DeepSeek Web
 
 让 DSH 使用你自己的 DeepSeek 网页账号完成对话、工具任务和长对话处理，无需配置 API Key。模型在 DeepSeek 服务器运行，工具由 DSH 在本机按原有权限执行。
 
-当前版本：**v1.3.1** · [下载安装包](https://github.com/QingLong-C/Plugin-TokenFree/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+本仓库为私有项目，下载和克隆需要有访问权限的 GitHub 账号。
 
-本仓库基于 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) v0.2.0 独立维护，整合兼容性与可靠性修复，保留 MIT 许可及原作者署名。
+当前版本：**v1.3.2** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 ## 项目用途
 
@@ -19,8 +19,8 @@
 ## 怎么用
 
 1. 按下方部署步骤安装并重启 DSH。
-2. 打开「设置 → TokenFree」，在插件专用 Chrome 窗口登录自己的 DeepSeek 账号。
-3. 点击「使用」，或选择 **TokenFree · DeepSeek Web**；点击「使用」也会设为当前 profile 的默认模型。
+2. 打开「设置 → DeepSeek Web」，在插件专用 Chrome 窗口登录自己的 DeepSeek 账号。
+3. 点击「使用」，或选择 **DeepSeek Web**；点击「使用」也会设为当前 profile 的默认模型。
 4. 在 DSH 中正常对话和调用工具。当前任务仍运行时，符合恢复条件的官网限流会自动等待后继续，无需手动发送“继续”。
 
 ## 注意事项
@@ -45,7 +45,7 @@
 
 ### 安装发行包
 
-1. 从本仓库 [Releases](https://github.com/QingLong-C/Plugin-TokenFree/releases) 下载对应版本的 `.tgz` 和 `SHA256SUMS`。本维护版只通过 GitHub 发布，不使用 npm 上游同名包代替。
+1. 从本仓库 [Releases](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases) 下载对应版本的 `.tgz` 和 `SHA256SUMS`。本维护版只通过 GitHub 发布，不使用 npm 上游同名包代替。
 2. 在下载目录校验完整性：
 
 ```sh
@@ -55,7 +55,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.3.1.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.3.2.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。
@@ -67,8 +67,8 @@ dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.3.1.tgz
 需要 Node.js `^22.19.0 || >=24`、pnpm `10.12.1`，以及可安装的 DSH SDK 依赖：
 
 ```sh
-git clone https://github.com/QingLong-C/Plugin-TokenFree.git
-cd Plugin-TokenFree
+git clone https://github.com/QingLong-C/Plugin-DeepSeek-Web.git
+cd Plugin-DeepSeek-Web
 pnpm install --frozen-lockfile
 pnpm check
 ```
@@ -78,3 +78,9 @@ pnpm check
 ## 许可
 
 [MIT](LICENSE)。来源、原作者和第三方说明见 [NOTICE](NOTICE.md) 与 [第三方许可](THIRD_PARTY_NOTICES.md)。
+
+## 原作者与项目来源
+
+本项目基于 [yuezengwu/dsh-tokenfree](https://github.com/yuezengwu/dsh-tokenfree) v0.2.0（提交 `6a57b2f9c512bacafe678868c08ef47bb7b484fe`）独立维护，感谢原作者 yuezengwu，保留原版权及 MIT 许可。当前维护：QingLong-C。
+
+后续上游有更新时，先比较源码、依赖和测试，再选择性合并有价值且兼容现有功能的改动；没有更新或没有合并必要时仅作参考，不自动覆盖本维护版。

@@ -401,7 +401,7 @@ export class SessionEngine {
       if (previous && !summary && ['awaiting-checkpoint', 'failed'].includes(previous.compaction?.phase ?? '')) throw new TokenFreeError('The previous compaction needs native verification or an explicit manual retry.', 'COMPACTION_PENDING')
       if (previous && (!rebase || summary)) {
         await metadata(active => this.refresh(previous, client, input.thinking, active, Boolean(summary), expectedEpoch ?? account.epoch))
-        if (!summary && pressure(previous)) throw new TokenFreeError('Context count reached 50% of the effective budget; native TokenFree compaction must complete first.', 'COMPACTION_REQUIRED')
+        if (!summary && pressure(previous)) throw new TokenFreeError('Context count reached 50% of the effective budget; native DeepSeek Web compaction must complete first.', 'COMPACTION_REQUIRED')
       }
       client.bindOperation?.(id)
       const imageRefs = imageReferences(summary || rebase ? input.messages : input.messages.slice(previous!.prefix.length))

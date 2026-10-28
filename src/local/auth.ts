@@ -51,6 +51,6 @@ export async function saveCredential(value: unknown, file = defaultCredentialFil
 export async function resolveCredential(file = defaultCredentialFile()): Promise<WebCredential> {
   if (process.env.DEEPSEEK_WEB_TOKEN?.trim()) return normalizeCredential({ token: process.env.DEEPSEEK_WEB_TOKEN })
   const credential = await readCredential(file)
-  if (!credential) throw new LlmError('请在 DSH 设置 → TokenFree 中点击登录。', 'MISSING_CREDENTIAL')
+  if (!credential) throw new LlmError('请在 DSH 设置 → DeepSeek Web 中点击登录。', 'MISSING_CREDENTIAL')
   return credential
 }

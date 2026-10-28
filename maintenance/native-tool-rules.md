@@ -4,13 +4,13 @@
 
 DSH 的 `deepseek-account` 使用平台账号 grant，经 `x-dsh-auth-token` 交给 Messages provider；无需填写 API Key，并不等于调用网页版。已检查构建的默认 Messages 地址为 `https://api.deepseek.com/anthropic/v1/messages`，可被受信配置覆盖。其工具定义作为 `tools[].input_schema` 单独发送，返回工具块与 `input_json_delta`。
 
-TokenFree 保留网页版 `chat.deepseek.com/api/v0/chat/completion`，工具目录与返回契约序列化在 prompt 中。复制请求字段、schema 转换函数或客户端解析器，不能证明网页后端执行了原生工具约束；不能把另一 OpenAI 适配器中的 strict 逻辑当作 DeepSeek Account 已开启 strict 的证据。
+DeepSeek Web 保留网页版 `chat.deepseek.com/api/v0/chat/completion`，工具目录与返回契约序列化在 prompt 中。复制请求字段、schema 转换函数或客户端解析器，不能证明网页后端执行了原生工具约束；不能把另一 OpenAI 适配器中的 strict 逻辑当作 DeepSeek Account 已开启 strict 的证据。
 
 原生 Messages 也会在工具 JSON 非法、块未关闭、缺结束原因或流提前结束时报错。因此可借鉴的是统一的契约与生命周期，不存在已从客户端取得、可保证任意错误自动修好的规则集。平台账号与网页账号的额度来源也不得混同；不要为修格式错误自动切换渠道、账户或模型。
 
 ## 统一规则
 
-| 规则 | TokenFree 执行位置 | 验证入口 |
+| 规则 | DeepSeek Web 执行位置 | 验证入口 |
 | --- | --- | --- |
 | 每步明确工具目录、参数声明和返回类型 | `src/core/codec.ts`；按当前声明生成契约 | `tests/strict-schema.test.mjs`、策略回归 |
 | 请求身份、工具目录版本与原始规则不混用 | `src/core/codec.ts`、`src/dsh/tool-policy.ts` | identity 与目录变化回归 |

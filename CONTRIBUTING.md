@@ -41,7 +41,7 @@ pnpm check
 - 合成最小复现可以提交；凭据、个人路径、真实 chat URL、原始日志、截图和浏览器配置不能提交。完整证据留在本机 research 或 .local。
 - 更新 pnpm-lock.yaml 与依赖声明必须同一 PR；不使用 file/link 依赖或依赖工作区提升。
 
-[公开仓库](https://github.com/QingLong-C/Plugin-TokenFree)包含四组模块和离线测试。安全渠道状态见 [安全报告](SECURITY.md)，不填写不存在的邮箱。代码以现有 MIT 许可贡献，不额外要求 CLA。讨论对事、尊重贡献者，不提供响应时限承诺。
+[公开仓库](https://github.com/QingLong-C/Plugin-DeepSeek-Web)包含四组模块和离线测试。安全渠道状态见 [安全报告](SECURITY.md)，不填写不存在的邮箱。代码以现有 MIT 许可贡献，不额外要求 CLA。讨论对事、尊重贡献者，不提供响应时限承诺。
 
 ## 检查与发布
 

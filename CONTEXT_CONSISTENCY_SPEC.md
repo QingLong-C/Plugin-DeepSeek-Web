@@ -27,11 +27,11 @@
 | 已确认的工具目录或指令增量 | 按既定更新协议处理 | 不将正常工具增删改误判为历史改写 |
 | 打开或查看一个分叉，但没有继续生成 | 只恢复本地关系，不创建空 chat | 不为查看历史消耗生成或制造空网页记录 |
 
-对于子 session，不共享父 chat 的写游标，即使子历史最后一条 assistant 带有从父 session 复制的 TokenFree replayState。该元数据只作为继承来源，不能当作子 session 已拥有父网页关联。子 session 生成自己的调用 ID 和 pending 状态；父 session 的未完成操作不自动由子 session 接管。
+对于子 session，不共享父 chat 的写游标，即使子历史最后一条 assistant 带有从父 session 复制的 DeepSeek Web replayState。该元数据只作为继承来源，不能当作子 session 已拥有父网页关联。子 session 生成自己的调用 ID 和 pending 状态；父 session 的未完成操作不自动由子 session 接管。
 
 示例：父 DSH session 已到第 10 轮，在第 4 轮分叉。子 session 导入第 4 轮边界前的有效历史和新的追问；父网页 chat 第 5–10 轮内容不会进入子 chat。父 session 继续使用自己的原关联，两个分支互不推进对方游标。
 
-子会话继承父会话 TokenFree 启用态与思考设置，并保持同一 web-default 模型。用户已接受原生选择同时更新全局默认，不再要求仅当前会话。新建普通分叉在串行等待的 agent/created 中调用现有公开 selectModel，完成原生记录与缓存同步后才开始组装；其他会话的 resume 与 subagent 不套此规则。不取父网页游标，不增加上游接口。接线与验收见 [主方案第 2 节](TECHNICAL_DESIGN.md#2-p1-1原生启用默认模型与分叉)。
+子会话继承父会话 DeepSeek Web 启用态与思考设置，并保持同一 web-default 模型。用户已接受原生选择同时更新全局默认，不再要求仅当前会话。新建普通分叉在串行等待的 agent/created 中调用现有公开 selectModel，完成原生记录与缓存同步后才开始组装；其他会话的 resume 与 subagent 不套此规则。不取父网页游标，不增加上游接口。接线与验收见 [主方案第 2 节](TECHNICAL_DESIGN.md#2-p1-1原生启用默认模型与分叉)。
 
 ## 每次生成前的核对
 

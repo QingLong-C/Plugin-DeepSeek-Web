@@ -1,4 +1,4 @@
-# TokenFree 技术方案
+# DeepSeek Web 技术方案
 
 > 维护版 v1.3.1 已实现原生图片附件转发；当前行为与恢复边界见 [图片功能](IMAGES.md)。以下继承设计与历史状态不替代当前实现及验收。
 
@@ -12,7 +12,7 @@
 
 本次整体 Review 继续保持一个 npm 包、四组模块。并发是原有会话边界的修正，旧版本未增加账号请求队列；当前增加 local/request-gate，仍不增加后台服务、监听端口或全局恢复协调器。Review 结果见 [技术复核](TECHNICAL_REVIEW.md)。
 
-最新边界收敛：压缩是 TokenFree 接入的内置行为，随登录可用且会话选中 TokenFree 一起生效。官网计量触发、DSH 原生摘要/checkpoint 和网页新 chat 承接必须成套接入，不再要求用户单独装配压缩后端。下文以“压缩接入边界”为准；此前要求逐 profile/preset 选择 `dsh-tokenfree/compaction` 的步骤撤回。2026-10-23 已通过主插件接入原生 Basic 作用域，标准模式自动接线及最少状态已实现；离线组合与真实验收范围分别见 [验证记录](VALIDATION.md)。
+最新边界收敛：压缩是 DeepSeek Web 接入的内置行为，随登录可用且会话选中 DeepSeek Web 一起生效。官网计量触发、DSH 原生摘要/checkpoint 和网页新 chat 承接必须成套接入，不再要求用户单独装配压缩后端。下文以“压缩接入边界”为准；此前要求逐 profile/preset 选择 `dsh-tokenfree/compaction` 的步骤撤回。2026-10-23 已通过主插件接入原生 Basic 作用域，标准模式自动接线及最少状态已实现；离线组合与真实验收范围分别见 [验证记录](VALIDATION.md)。
 
 最新计量策略（2026-10-23）：主动门槛改为有效预算 B 的 50%，`C ≥ ceil(B/2)`。B 优先使用官网当前模型/思考模式的有效预算；读不到时使用用户指定默认值 **890,880 tokens**，默认门槛 **445,440 tokens**。默认来源单独记录，不冒充官网实时返回。C 始终来自当前分支官网计数，缺 C 不估算、不触发。这项决策取代旧 80% 与“缺 B 禁用判断”的规则；历史验收按原比例保留。
 
@@ -49,37 +49,37 @@ flowchart LR
 | 类别 | 能力 |
 | --- | --- |
 | 直接继承 DSH | Agent 循环、同一会话内的排队/打断、跨会话任务并发、工具审批与执行、真实工具结果、历史与分叉、原生渲染、压缩事务与 checkpoint、本地标题 fallback |
-| TokenFree 适配或局部替换 | 网页协议转原生块；系统/工具文本桥接；仅 TokenFree 路由的官网 50% 压缩判断及候选范围计算；搜索排除 |
-| TokenFree 新增 | 本人官网登录、三端共享撤销、网页关联、增量前缀检查、恢复与停止核实、官网指标展示、本地诊断、JSON/schema 和可见文本 stop 补偿 |
+| DeepSeek Web 适配或局部替换 | 网页协议转原生块；系统/工具文本桥接；仅 DeepSeek Web 路由的官网 50% 压缩判断及候选范围计算；搜索排除 |
+| DeepSeek Web 新增 | 本人官网登录、三端共享撤销、网页关联、增量前缀检查、恢复与停止核实、官网指标展示、本地诊断、JSON/schema 和可见文本 stop 补偿 |
 
 DSH 决定任务与执行权限；官网决定生成、消息树、终态和原始计数；插件负责适配与关联。文本协议不是官网原生 function calling，不能替代 DSH 授权。插件不读取或改写 DSH 内部数据库。
 
 ## 2. P1-1：原生启用、默认模型与分叉
 
-**采用现有行为：**用户已明确接受启用 TokenFree 时更新全局默认，取消此前“只影响当前会话”的限制。兼容基线已随本机升级至 DSH `0.2.1-rc.3`，不需要上游新增接口或 saveDefault 参数。
+**采用现有行为：**用户已明确接受启用 DeepSeek Web 时更新全局默认，取消此前“只影响当前会话”的限制。兼容基线已随本机升级至 DSH `0.2.1-rc.3`，不需要上游新增接口或 saveDefault 参数。
 
-桌面和 Web 登录后提供“使用 TokenFree”入口，说明“同时设为默认模型”，不增加确认弹窗。CLI 沿用原生配置启动，路由始终固定为 TokenFree / `web-default`：
+桌面和 Web 登录后提供“使用 DeepSeek Web”入口，说明“同时设为默认模型”，不增加确认弹窗。CLI 沿用原生配置启动，路由始终固定为 DeepSeek Web / `web-default`：
 
 | 场景 | 公开接线 |
 | --- | --- |
 | 有当前会话 | 调 `sessionController.selectModel({ sessionId, provider, model, reasoningEffort })`；DSH 更新原生选择记录与缓存，并后台保存全局默认 |
 | 设置页无当前会话 | 主机用 `llm.resolveCallConfig` 验证固定路由，再调并等待 `agentDefaultModel.saveSelection`；不伪造 session、不批量改已有会话 |
-| headless CLI | 以 TokenFree 作为该 profile/显式 overlay 的原生 agent-default-model；由 headless 自己读取默认、安装 ModelSelectionRef 并创建/恢复 Agent，插件不重复安装选择器 |
+| headless CLI | 以 DeepSeek Web 作为该 profile/显式 overlay 的原生 agent-default-model；由 headless 自己读取默认、安装 ModelSelectionRef 并创建/恢复 Agent，插件不重复安装选择器 |
 | 独立 tokenfree 登录/诊断 CLI | 只操作共用账号与诊断，不直接调用另一 DSH 进程的服务，不修改 DSH 私有配置或后台定位“当前会话” |
 | 已启用会话重启 | 直接读取 DSH 原生持久选择；不因打开页面或重试登录反复覆盖用户默认 |
-| TokenFree 会话产生新的普通分叉 | 在公开、串行等待的 `agent/created` 中，识别新建 seeded session 及 parentSession，读取父会话原生有效选择与附加设置，调用同一公开 selectModel 选中子会话并等待返回，再允许首轮组装 |
+| DeepSeek Web 会话产生新的普通分叉 | 在公开、串行等待的 `agent/created` 中，识别新建 seeded session 及 parentSession，读取父会话原生有效选择与附加设置，调用同一公开 selectModel 选中子会话并等待返回，再允许首轮组装 |
 
-分叉接线只在具备 SessionController 的主机上处理 TokenFree 父会话的新建普通分叉，不覆盖其他模型会话、subagent 或既有 session 的 resume。父子只有启用与设置继承，不共享网页 chat、游标、active 或工具派发；仅查看不创建网页 chat。选择失败则初始化失败，不能先向全局默认发一轮再修正。当前源码在 agent/created 前已注册 live Agent，公开 selectModel 能解析该实例；事件等待先于输入处理，实际次序仍须组合验收。headless 沿用其入口自己的选择与恢复规则，不为它加载桌面 controller。
+分叉接线只在具备 SessionController 的主机上处理 DeepSeek Web 父会话的新建普通分叉，不覆盖其他模型会话、subagent 或既有 session 的 resume。父子只有启用与设置继承，不共享网页 chat、游标、active 或工具派发；仅查看不创建网页 chat。选择失败则初始化失败，不能先向全局默认发一轮再修正。当前源码在 agent/created 前已注册 live Agent，公开 selectModel 能解析该实例；事件等待先于输入处理，实际次序仍须组合验收。headless 沿用其入口自己的选择与恢复规则，不为它加载桌面 controller。
 
 “全局”指当前 DSH 配置/profile 的默认，新会话按原生规则使用；已经有原生选择的其他会话不批量迁移。忙时选择按 DSH 原生边界生效，不热改在途请求。插件不再安装第二套选择钩子、不直接追加原生选择事件、不访问 controller 私有缓存，也不备份后自动恢复全局默认。
 
 默认保存失败只影响该次启用动作的默认状态，不取消其他会话、不回滚它们的选择。正常生成、恢复及错误处理都不写默认配置。
 
-三端共用账号不等于多个 profile 的默认设置自动同步。CLI 的 profile 必须单独按原生方式选中 TokenFree；不为同步默认去编辑其他 profile 或更高层 home patch。默认 JSONL 存储的实例身份由公开 dsh-home-paths 的 `dshHomePath('sessions')` 规范化路径派生，本地会话键为该身份加 sessionId 的哈希，避免两个 DSH_HOME 中同名 session 混用。非标准存储须显式给出稳定实例标识，不能读取私有 backend.root 猜测。
+三端共用账号不等于多个 profile 的默认设置自动同步。CLI 的 profile 必须单独按原生方式选中 DeepSeek Web；不为同步默认去编辑其他 profile 或更高层 home patch。默认 JSONL 存储的实例身份由公开 dsh-home-paths 的 `dshHomePath('sessions')` 规范化路径派生，本地会话键为该身份加 sessionId 的哈希，避免两个 DSH_HOME 中同名 session 混用。非标准存储须显式给出稳定实例标识，不能读取私有 backend.root 猜测。
 
 原生 selectModel 的返回只证明当前会话选择完成，不证明后台默认保存成功；默认以公开 currentSelection 与原生配置结果核实，失败显示“当前会话已启用，默认未保存”。无配置编辑器时 saveSelection 可能不写入，不能报告已持久化。退出账号撤销使用权，但不自动改回默认模型或切换来源；后续请求按登录状态明确提示。
 
-验收：启用后当前会话与新会话使用 TokenFree；已有其他会话按原生选择保持；未发首问重启、旧历史位置分叉和思考继承正确；原生记录、界面与请求头一致；默认保存失败不误报，不重复创建网页 chat。新增依赖只使用公开包入口。2026-10-23 单卡片启用已接入当前会话的原生选择与无会话的默认保存，分叉接线和其余组合仍待验证。
+验收：启用后当前会话与新会话使用 DeepSeek Web；已有其他会话按原生选择保持；未发首问重启、旧历史位置分叉和思考继承正确；原生记录、界面与请求头一致；默认保存失败不误报，不重复创建网页 chat。新增依赖只使用公开包入口。2026-10-23 单卡片启用已接入当前会话的原生选择与无会话的默认保存，分叉接线和其余组合仍待验证。
 
 ## 3. 一套操作流程与最少状态
 
@@ -190,7 +190,7 @@ HTTP 成功、官网完成、已交付、DSH 已保存、工具已执行是不�
 
 正常完成仍通过 `finish.replayState` 保存网页身份，便于重放核对；**它不是取消场景唯一的恢复证据**。只在原生保存且刷盘后确认父消息。
 
-崩溃后原生可只保存 step/end 与 turn/end(interrupted)，没有 assistant/attempt。仅在保存的 afterSeq 精确对应该闭合、同 turn/step、有效请求头是 TokenFree、步骤开始到该点没有工具或其他交付时接受该原生中断事实；官网终态必须另行核实。不能从缺少 assistant 推断可重发，不能手工补原生记录；证据不满足时继续暂停。
+崩溃后原生可只保存 step/end 与 turn/end(interrupted)，没有 assistant/attempt。仅在保存的 afterSeq 精确对应该闭合、同 turn/step、有效请求头是 DeepSeek Web、步骤开始到该点没有工具或其他交付时接受该原生中断事实；官网终态必须另行核实。不能从缺少 assistant 推断可重发，不能手工补原生记录；证据不满足时继续暂停。
 
 ### 结果与下一次续聊
 
@@ -236,7 +236,7 @@ HTTP 成功、官网完成、已交付、DSH 已保存、工具已执行是不�
 
 沿用版本化 `kind=final/tool` 文本协议；最多 8 个调用，稳定 ID，严格 JSON、重复键/额外字段、精确工具名、整批参数与策略校验，任何非法整批拒绝。工具参数复用 DSH 公开 schema 子集与校验函数，不补参、不强转、不加载远程 ref。权限、执行、并发和结果始终交 DSH。
 
-目录每次取当前完整投影，绑定本次父消息与版本；新增/变更发完整定义，删除发通知，不与历史 toolHistory 取并集。恢复不换目录，执行 guard 拒绝已失效定义。TokenFree 作用域排除内置 web_search，包括适用的嵌套路径；不全局注销，保留本地文件搜索。详见 [工具规格](TOOL_CALLING_SPEC.md)。
+目录每次取当前完整投影，绑定本次父消息与版本；新增/变更发完整定义，删除发通知，不与历史 toolHistory 取并集。恢复不换目录，执行 guard 拒绝已失效定义。DeepSeek Web 作用域排除内置 web_search，包括适用的嵌套路径；不全局注销，保留本地文件搜索。详见 [工具规格](TOOL_CALLING_SPEC.md)。
 
 JSON/schema 是本地完整校验，不承诺官网约束解码；工具选择与输出策略是插件会话设置，不伪造 GenerateOptions 中不存在的 tool_choice/response_format。精确采样、logprobs、seed、多模态、联网搜索及精确输出 token 硬限制等超出首发的要求提前拒绝，不自动换来源。maxTokens 仅表达意图，本地大小保护不冒充 token 限制。
 
@@ -248,28 +248,28 @@ JSON/schema 是本地完整校验，不承诺官网约束解码；工具选择�
 
 #### 压缩接入边界
 
-**用户只启用 TokenFree，不配置压缩。** 当前会话选中固定的 TokenFree 路由且本人登录可用后，以下三段组成同一条接入链；仅登录不会接管其他模型会话。
+**用户只启用 DeepSeek Web，不配置压缩。** 当前会话选中固定的 DeepSeek Web 路由且本人登录可用后，以下三段组成同一条接入链；仅登录不会接管其他模型会话。
 
 | 边界 | 唯一职责 |
 | --- | --- |
-| TokenFree 触发 | 读取本会话当前网页分支的官方累计计数 C；B 优先使用官网当前模式预算，读不到时用默认 890,880。在安全步骤边界判断 `C ≥ ceil(B/2)`；不估算 C，不借用其他会话或旧 chat 的计量 |
+| DeepSeek Web 触发 | 读取本会话当前网页分支的官方累计计数 C；B 优先使用官网当前模式预算，读不到时用默认 890,880。在安全步骤边界判断 `C ≥ ceil(B/2)`；不估算 C，不借用其他会话或旧 chat 的计量 |
 | DSH 原生压缩 | 接受选定范围，保留原生配对检查、摘要输入构造、缩短校验、取消、事务、历史保存和 checkpoint；插件不另建压缩事务或 checkpoint |
-| TokenFree 网页承接 | 在原 chat 的准确摘要分支完成摘要；原生 checkpoint 持久化后，新建网页 chat 导入有效摘要与保留尾部，继续原 DSH session，记录前后关联 |
+| DeepSeek Web 网页承接 | 在原 chat 的准确摘要分支完成摘要；原生 checkpoint 持久化后，新建网页 chat 导入有效摘要与保留尾部，继续原 DSH session，记录前后关联 |
 
 `dsh/` 负责把这条链随主插件接入实际生效的 DSH 作用域；`core/` 负责 C/B 判断与会话迁移流程；`deepseek-web/` 封装官网计数、摘要分支与 chat 操作；`local/` 原子保存该会话的关联和恢复状态。模块及依赖方向不变。
 
 接入必须满足：
 
-- 标准模式、新建及恢复的 TokenFree 会话无需额外 YAML、独立安装项、预设切换或“开启压缩”操作。桌面、CLI 和本机 Web 遵守同一规则。
+- 标准模式、新建及恢复的 DeepSeek Web 会话无需额外 YAML、独立安装项、预设切换或“开启压缩”操作。桌面、CLI 和本机 Web 遵守同一规则。
 - 原生引擎扩展仅作插件内部实现，不作为可脱离网页计量与迁移链使用的压缩产品；移除面向用户的独立后端配置和关闭开关。内部仍可复用 Basic 引擎的公开扩展点。
 - 通过 DSH 公开能力接线；不修改 DSH 源码，不补丁全局类或函数，不加载两个竞争的压缩处理链。其他模型继续使用其原生规则，用户自定义后端不能被悄悄覆盖。
-- 接线不可用是插件兼容或初始化失败，不能显示“已启用”再要求用户配置后端。失败只影响对应 TokenFree 会话；已达到门槛但未成功压缩时暂停该会话，不绕过限制继续发送。
+- 接线不可用是插件兼容或初始化失败，不能显示“已启用”再要求用户配置后端。失败只影响对应 DeepSeek Web 会话；已达到门槛但未成功压缩时暂停该会话，不绕过限制继续发送。
 - 缺 C 显示未知、停用本次主动判断，不编造计数；缺 B 使用指定默认值并标记来源。保留原生手动压缩和官网真实超限恢复，它们也必须经过同一摘要、checkpoint 与新 chat 链路。
 - A 压缩只占 A 的会话边界；B 可以同时生成、保存和更新自己的计量。共享登录不引入压缩队列、全局 active 或全局等待。
 
 实现使用 Cordis 公开 registry、状态事件及 Fiber/Loader 生命周期，在主插件可用后将同作用域的原生 Basic 槽位替换为内部派生实现；先完成旧实例释放，再加载一个替代实例。后续标准预设挂载也按此处理，并在普通联网前核对当前 Agent 实际使用的服务。Loader 的运行时替换不写入个人配置；失败恢复原服务，主插件卸载也恢复原配置和原服务。
 
-内部派生实现只改变 TokenFree 的门槛、摘要路由和保留范围；其他模型保留原 auto 设置与 modelPolicies，手动压缩仍走原生路径。自定义后端不替换，缺失或不兼容只阻止对应 TokenFree 请求。`dsh-tokenfree/compaction` 仅保留为内部 Loader 解析及旧配置兼容出口，依赖主插件运行时，不再是用户安装步骤。初始化去重只针对同一服务实例，当前生成与摘要均遵守账号队列。
+内部派生实现只改变 DeepSeek Web 的门槛、摘要路由和保留范围；其他模型保留原 auto 设置与 modelPolicies，手动压缩仍走原生路径。自定义后端不替换，缺失或不兼容只阻止对应 DeepSeek Web 请求。`dsh-tokenfree/compaction` 仅保留为内部 Loader 解析及旧配置兼容出口，依赖主插件运行时，不再是用户安装步骤。初始化去重只针对同一服务实例，当前生成与摘要均遵守账号队列。
 
 安全步骤边界读取当前分支官网 C 与有效预算 B，`C ≥ ceil(B/2)` 触发原生压缩。缺 B 使用明确来源的默认 890,880；缺 C 时显示未知、允许正常对话并停用主动判断，保留手动及真实官网超限处理。不估算 C，不把官网或默认预算说成模型总窗口。关联或操作状态未知不适用“缺指标可继续”。
 

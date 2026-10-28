@@ -2,7 +2,7 @@
 
 报告凭据暴露、未授权工具派发、跨会话数据混入或公开监听等问题时，请不要在公开 Issue/PR 粘贴 token、Cookie、原始请求日志、浏览器目录、个人代码或真实 chat 链接。
 
-本仓库当前未启用 GitHub 私密漏洞报告。请先通过[公开 Issue](https://github.com/QingLong-C/Plugin-TokenFree/issues)提交不含敏感数据的问题摘要，需要私密沟通时仅提出沟通请求；不要把凭据或原始日志贴进公开渠道。
+本仓库当前未启用 GitHub 私密漏洞报告。请先通过[公开 Issue](https://github.com/QingLong-C/Plugin-DeepSeek-Web/issues)提交不含敏感数据的问题摘要，需要私密沟通时仅提出沟通请求；不要把凭据或原始日志贴进公开渠道。
 
 报告建议包含：插件/DSH/系统版本、入口、最小步骤、错误阶段、是否有工具已执行，以及不含账号数据的复现。维护者不需要你的账号密码或可用登录凭据。
 

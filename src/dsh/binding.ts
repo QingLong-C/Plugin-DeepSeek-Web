@@ -4,6 +4,6 @@ const runtimes = new Map<string, TokenFreeAdapter>()
 export function bindRuntime(id: string, runtime: TokenFreeAdapter) { runtimes.set(id, runtime); return () => { runtimes.delete(id) } }
 export function runtimeFor(id: string): TokenFreeAdapter {
   const runtime = runtimes.get(id)
-  if (!runtime) throw new Error('TokenFree adapter is not mounted.')
+  if (!runtime) throw new Error('DeepSeek Web adapter is not mounted.')
   return runtime
 }

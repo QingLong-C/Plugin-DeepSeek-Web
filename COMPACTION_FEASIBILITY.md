@@ -26,7 +26,7 @@
 
 ### 选区与执行分别负责
 
-TokenFree 负责官方 C≥0.8B 判断和很小的保留范围策略。DSH 负责工具配对是否安全、摘要输入构造、表面稳定性、摘要是否缩短、compaction 事件、checkpoint 与取消。无需真实模型窗口，也不将官网 B 传入 contextWindow。
+DeepSeek Web 负责官方 C≥0.8B 判断和很小的保留范围策略。DSH 负责工具配对是否安全、摘要输入构造、表面稳定性、摘要是否缩短、compaction 事件、checkpoint 与取消。无需真实模型窗口，也不将官网 B 传入 contextWindow。
 
 推荐首发主动压缩采用**与原生 retainTokens=0 相同的保留规则**：保留最后一个表面节点；若该节点属于工具调用/结果组，则向前扩大保留段，直到原生判定配对平衡。0 表示不设额外的近期 token 保留预算，**不表示保留零条消息**。这是原生手动与真实超限路径已使用的规则；首发主动触发复用其语义，不套用依赖真实窗口的默认 retainRatio。
 
@@ -58,7 +58,7 @@ TokenFree 负责官方 C≥0.8B 判断和很小的保留范围策略。DSH 负�
 
 ### 原生事件接线及失败检查
 
-兼容 Basic 组合时只装配一个派生 compaction 服务：TokenFree pressure 分支用官网指标和上述候选范围，再调用继承的 compactRegion；其他路由交回 super。手动 compactNow 保留原生空闲维护；真实 context-overflow 才进入原生超限恢复。不在压力分支伪造超限或调用需要空闲的 compactNow。用户自定义 compaction 后端不自动替换，先做兼容检查。
+兼容 Basic 组合时只装配一个派生 compaction 服务：DeepSeek Web pressure 分支用官网指标和上述候选范围，再调用继承的 compactRegion；其他路由交回 super。手动 compactNow 保留原生空闲维护；真实 context-overflow 才进入原生超限恢复。不在压力分支伪造超限或调用需要空闲的 compactNow。用户自定义 compaction 后端不自动替换，先做兼容检查。
 
 原生 agent/pre-step 监听会捕获压缩错误、记录警告后继续，因此仅覆写 compactIfNeeded 不足以保证“达到门槛先压缩”。DSH 接入须把压缩阶段和失败传给插件 core；正常生成入口在联网、获取本会话锁前再次核实：如果本分支已知达到门槛而压缩未完成，或 checkpoint 后新 chat 未初始化，就报明确的压缩/初始化错误，不发送普通 completion。purpose=compaction 允许通过这一普通请求检查，否则会阻塞自身摘要。
 
@@ -68,7 +68,7 @@ TokenFree 负责官方 C≥0.8B 判断和很小的保留范围策略。DSH 负�
 
 ### 为什么编辑根输入
 
-在旧尾部追加“总结前 N 轮”，模型仍沿父链看到保留尾部和其他历史，不能精确对应 DSH 选区。编辑非根输入也仍继承其祖先。推荐编辑**该 TokenFree 当前 chat 主链的根 USER 消息**，把 DSH 交来的完整 compaction 请求一次编码为新的根输入；chat ID 保持不变，摘要在新根分支生成。
+在旧尾部追加“总结前 N 轮”，模型仍沿父链看到保留尾部和其他历史，不能精确对应 DSH 选区。编辑非根输入也仍继承其祖先。推荐编辑**该 DeepSeek Web 当前 chat 主链的根 USER 消息**，把 DSH 交来的完整 compaction 请求一次编码为新的根输入；chat ID 保持不变，摘要在新根分支生成。
 
 已审阅前端提供以下依据：
 

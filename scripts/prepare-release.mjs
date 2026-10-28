@@ -8,7 +8,7 @@ const root = resolve(import.meta.dirname, '..')
 const run = (command, args) => execFileSync(command, args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim()
 const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
 const { version, name } = manifest
-const repo = 'QingLong-C/Plugin-TokenFree'
+const repo = 'QingLong-C/Plugin-DeepSeek-Web'
 assert(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version), 'Use an explicit release version')
 assert(!manifest.private, 'Remove private only after human release authorization')
 assert.equal(name, 'dsh-tokenfree')

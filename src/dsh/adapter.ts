@@ -73,13 +73,13 @@ export class TokenFreeAdapter extends LlmAdapter {
       native: this.dependencies.native, log: this.dependencies.diagnostics, maxPromptChars: this.maxPromptChars, repairRelay: this.dependencies.repairRelay,
       readImage: this.dependencies.readImage ? (ref, signal) => this.dependencies.readImage!(ref as ImageBlock['attachment'], signal) : undefined }))()
   }
-  override providerInfo(provider: string) { return { id: provider, name: 'TokenFree · DeepSeek Web' } }
+  override providerInfo(provider: string) { return { id: provider, name: 'DeepSeek Web' } }
   override providerRetryPolicy() { return resolveRetryPolicy({ mode: 'normal', maxRetries: 0 }, 'dsh-tokenfree.retryPolicy') }
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
     return [{ provider, id: MODEL, name: 'DeepSeek Web', description: '本人网页账号；持久会话与恢复；官方额度未知。', inputModalities: ['text', 'image'] }]
   }
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
-    if (model !== MODEL) throw new LlmError('TokenFree supports web-default only.', 'MODEL_UNSUPPORTED')
+    if (model !== MODEL) throw new LlmError('DeepSeek Web supports web-default only.', 'MODEL_UNSUPPORTED')
     return { provider, id: model, name: 'DeepSeek Web', inputModalities: ['text', 'image'], reasoning: {
       efforts: [{ id: ReasoningEffortId('off'), name: '关闭' }, { id: ReasoningEffortId('web-on'), name: '官网思考' }], defaultEffort: ReasoningEffortId('web-on'),
     } }
@@ -128,7 +128,7 @@ export class TokenFreeAdapter extends LlmAdapter {
   async toolCatalogueForCall(sessionId: string, operationId: string): Promise<Tool[]> {
     await this.reconcile(sessionId)
     const { session, pending } = await (await this.engine()).inspect(sessionId)
-    if (pending || session?.lastOperationId !== operationId || session.needsRebase || !session.executionTools) throw new TokenFreeError('The saved TokenFree tool binding is unavailable.', 'TOOL_BINDING')
+    if (pending || session?.lastOperationId !== operationId || session.needsRebase || !session.executionTools) throw new TokenFreeError('The saved DeepSeek Web tool binding is unavailable.', 'TOOL_BINDING')
     return session.executionTools
   }
   async verifyPending(sessionId: string, operationId: string, requestStop = false) {
@@ -197,12 +197,12 @@ export class TokenFreeAdapter extends LlmAdapter {
     const accountSignal = this.dependencies.signal?.()
     const signal = AbortSignal.any([this.lifetime.signal, ...(accountSignal ? [accountSignal] : []), ...(options.signal ? [options.signal] : [])])
     try {
-      if (options.provider !== PROVIDER || options.model !== MODEL) throw new TokenFreeError('Unknown TokenFree route.', 'MODEL_UNSUPPORTED')
-      if (options.purpose && options.purpose !== 'compaction') throw new TokenFreeError('TokenFree keeps the native local title.', 'LOCAL_TITLE')
+      if (options.provider !== PROVIDER || options.model !== MODEL) throw new TokenFreeError('Unknown DeepSeek Web route.', 'MODEL_UNSUPPORTED')
+      if (options.purpose && options.purpose !== 'compaction') throw new TokenFreeError('DeepSeek Web keeps the native local title.', 'LOCAL_TITLE')
       const binding = options.purpose === 'compaction' && options.sessionId ? this.summaries.get(options.sessionId) : undefined
       const summary = binding?.anchor
       if (binding) binding.operationId = operationId
-      if (options.purpose === 'compaction' && !summary) throw new TokenFreeError('A native TokenFree compaction binding is required.', 'COMPACTION_UNAVAILABLE')
+      if (options.purpose === 'compaction' && !summary) throw new TokenFreeError('A native DeepSeek Web compaction binding is required.', 'COMPACTION_UNAVAILABLE')
       if (options.temperature !== undefined || (options.reasoningEffort !== undefined && !['off', 'web-on'].includes(options.reasoningEffort))) throw new TokenFreeError('Unsupported sampling or reasoning option.', 'UNSUPPORTED_OPTION')
       if (options.stop?.some(x => !x || x.length > 1024) || (options.stop?.length ?? 0) > 8) throw new TokenFreeError('Stop sequences must be 1–1024 characters, at most 8.', 'UNSUPPORTED_OPTION')
       signal.throwIfAborted()

@@ -18,7 +18,7 @@ const provider = 'tokenfree-deepseek-web', model = 'web-default'
 
 async function unwrap<T>(pending: Promise<RemoteResult<T>>): Promise<T> {
   const result = await pending
-  if (!result.ok) throw new Error('TokenFree account operation failed.')
+  if (!result.ok) throw new Error('DeepSeek Web account operation failed.')
   return result.value
 }
 
@@ -65,7 +65,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
     }
     scope.slots.inject('settings.section', () => scope.slots.register({
       name: 'settings.section', id: 'dsh-tokenfree:account', order: 16,
-      label: () => 'TokenFree', inject: () => ({ actions }),
+      label: () => 'DeepSeek Web', inject: () => ({ actions }),
     }, AccountSettings))
   })
   try { await feature.await() }
