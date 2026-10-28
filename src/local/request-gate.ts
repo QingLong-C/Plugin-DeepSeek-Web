@@ -3,11 +3,29 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { TokenFreeError, record } from '../core/errors.js'
 import { acquireLock } from './lock.js'
 import { readJson, writeJson } from './files.js'
+import type { ActiveOperation } from './store.js'
 
 export interface RequestPolicy { intervalMs: number; cooldownMs: number; maxCooldownMs: number }
 export const defaultRequestPolicy: Readonly<RequestPolicy> = Object.freeze({ intervalMs: 10_000, cooldownMs: 60_000, maxCooldownMs: 900_000 })
-interface State { version: 1; next: number; until: number; strikes: number }
+export type GenerationFlight = Pick<ActiveOperation, 'id' | 'sessionKey' | 'chatId' | 'parentId' | 'promptHash' | 'fileIds' | 'parentPath' | 'compaction' | 'identity' | 'rateRejected'>
+interface State { version: 1; next: number; until: number; strikes: number; flights?: GenerationFlight[] }
+const hash = (v: unknown) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v)
+const integer = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) >= 0
+const path = (v: unknown) => Array.isArray(v) && v.length > 0 && v.every(p => record(p) && integer(p.id) && (p.parentId === null || integer(p.parentId)) && hash(p.hash))
+function validFlight(v: unknown): v is GenerationFlight {
+  return record(v) && typeof v.id === 'string' && v.id.length > 0 && hash(v.sessionKey) && typeof v.chatId === 'string' && v.chatId.length > 0
+    && hash(v.promptHash) && (v.parentId === null || integer(v.parentId))
+    && (v.fileIds === undefined || Array.isArray(v.fileIds) && v.fileIds.every(id => typeof id === 'string' && /^file-[A-Za-z0-9_-]{1,128}$/.test(id)) && new Set(v.fileIds).size === v.fileIds.length)
+    && (v.parentId === null ? v.parentPath === undefined : path(v.parentPath))
+    && (v.compaction === undefined || record(v.compaction) && integer(v.compaction.rootId) && integer(v.compaction.oldParentId) && path(v.compaction.oldPath))
+    && (v.rateRejected === undefined || typeof v.rateRejected === 'boolean')
+    && (v.identity === undefined || record(v.identity) && v.identity.chatId === v.chatId && integer(v.identity.requestId) && integer(v.identity.responseId))
+}
 export interface RequestLease {
+  flights(): readonly GenerationFlight[] | undefined
+  initialize(flights: GenerationFlight[]): Promise<void>
+  started(flight: GenerationFlight): Promise<void>
+  finished(id: string): Promise<void>
   wait(signal: AbortSignal): Promise<void>
   submission(signal: AbortSignal): Promise<void>
   failed(error: unknown): Promise<void>
@@ -36,7 +54,9 @@ export class AccountRequestGate {
     try {
       const saved = await readJson<unknown>(this.path)
       if (saved !== undefined && (!record(saved) || saved.version !== 1
-        || !['next', 'until', 'strikes'].every(k => Number.isSafeInteger(saved[k]) && Number(saved[k]) >= 0))) {
+        || !['next', 'until', 'strikes'].every(k => Number.isSafeInteger(saved[k]) && Number(saved[k]) >= 0)
+        || saved.flights !== undefined && (!Array.isArray(saved.flights) || !saved.flights.every(validFlight)
+          || new Set(saved.flights.map(f => f.id)).size !== saved.flights.length))) {
         throw new TokenFreeError('Account cooldown state is damaged; it was preserved.', 'STATE_STORAGE')
       }
       const state: State = saved as State | undefined ?? { version: 1, next: 0, until: 0, strikes: 0 }
@@ -48,6 +68,18 @@ export class AccountRequestGate {
       await wait(Math.max(state.next, state.until), signal)
       const check = () => { if (released) throw new TokenFreeError('Account lease was released.', 'STATE_STORAGE') }
       return {
+        flights: () => { check(); return state.flights === undefined ? undefined : structuredClone(state.flights) },
+        initialize: async flights => {
+          check()
+          if (state.flights !== undefined || !flights.every(validFlight) || new Set(flights.map(f => f.id)).size !== flights.length) throw new TokenFreeError('Invalid generation fence initialization.', 'STATE_STORAGE')
+          state.flights = structuredClone(flights); await writeJson(this.path, state)
+        },
+        started: async flight => {
+          check()
+          if (!validFlight(flight) || state.flights === undefined || state.flights.some(f => f.id !== flight.id)) throw new TokenFreeError('An unconfirmed Web generation still owns this account.', 'PENDING_OPERATION')
+          state.flights = [structuredClone(flight)]; await writeJson(this.path, state)
+        },
+        finished: async id => { check(); if (state.flights?.some(f => f.id === id)) { state.flights = state.flights.filter(f => f.id !== id); await writeJson(this.path, state) } },
         wait: async active => { check(); await wait(Math.max(state.next, state.until), active) },
         submission: async active => { check(); await wait(Math.max(state.next, state.until), active); state.next = Date.now() + this.policy.intervalMs; await writeJson(this.path, state) },
         failed: async error => {

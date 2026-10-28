@@ -189,6 +189,13 @@ export class TokenFreeAdapter extends LlmAdapter {
     finally { this.summaries.delete(anchor.sessionId) }
   }
   async rebuild(sessionId: string) { await (await this.engine()).rebuild(sessionId); return this.inspect(sessionId) }
+  private hostIssues(schema: Record<string, unknown>, value: unknown): string[] {
+    // StrictSchemas checks the complete original contract first. The SDK validator
+    // is defined only for its asserted subset; a compatibility projection is not
+    // equivalent (weakened oneOf branches can even reject valid original values).
+    try { assertSupportedJsonSchema(schema) } catch { return [] }
+    return validateJsonSchemaValue(schema, value)
+  }
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const operationId = randomUUID()
     const started = Date.now()
@@ -255,13 +262,13 @@ export class TokenFreeAdapter extends LlmAdapter {
         const blocks = decodeResponse(text, input.tools, id, (tool, value) => {
           this.schemas.check(tool.parameters, value)
           assertSupportedJsonSchema(sanitizeJsonSchema(tool.parameters))
-          const issues = validateJsonSchemaValue(tool.parameters, value)
+          const issues = this.hostIssues(tool.parameters, value)
           if (issues.length) throw new ToolArgumentsError(`Tool ${tool.name} arguments failed host schema validation.`, { path: '', rule: 'host-schema' })
         }, kind => { localRepair?.(kind); log?.write('model.format-repair', { operationId, stage: 'local-syntax', attempt: 1 }) })
         if (input.policy) validatePolicyResult(blocks, input.policy, input.stop, (schema, value) => {
           this.schemas.check(schema, value, 'OUTPUT_SCHEMA')
           assertSupportedJsonSchema(sanitizeJsonSchema(schema))
-          const issues = validateJsonSchemaValue(schema, value)
+          const issues = this.hostIssues(schema, value)
           if (issues.length) throw new TokenFreeError(`Final JSON failed schema validation: ${issues[0]}`, 'OUTPUT_SCHEMA')
         })
         if (input.sessionId && input.executionTools) this.dependencies.checkTools?.(input.sessionId, blocks, input.executionTools)

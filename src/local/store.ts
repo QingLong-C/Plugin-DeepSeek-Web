@@ -98,6 +98,9 @@ const budget = (v: unknown) => v === undefined || (record(v) && (v.value === und
     : v.source === 'default' && integer(v.value) && v.value > 0 && (v.settingsVersion === undefined || integer(v.settingsVersion))) && text(v.observedAt)
   && (v.inputCharacterLimit === undefined || (integer(v.inputCharacterLimit) && v.inputCharacterLimit > 0)))
 const anchor = (v: unknown) => record(v) && text(v.compactionId) && integer(v.startSeq)
+const optionalFlags = (v: Record<string, unknown>, keys: string[]) => keys.every(k => v[k] === undefined || typeof v[k] === 'boolean')
+const blocks = (v: unknown) => Array.isArray(v) && v.every(b => record(b) && (b.type === 'text' || b.type === 'reasoning'
+  ? typeof b.text === 'string' : b.type === 'tool-call' && text(b.id) && text(b.name) && typeof b.arguments === 'string'))
 const policy = (v: unknown) => {
   if (v === undefined) return true
   if (!record(v) || !text(v.revision)) return false
@@ -130,13 +133,15 @@ function validOperation(v: unknown): boolean {
     && (v.native === undefined || (record(v.native) && v.native.sessionId === v.sessionId && integer(v.native.turn) && integer(v.native.step)
       && integer(v.native.afterSeq) && (v.native.settlementSeq === undefined || integer(v.native.settlementSeq))
       && (v.native.abandoned === undefined || typeof v.native.abandoned === 'boolean') && text(v.native.attemptId) && text(v.native.instance)))
-    && (v.rateRejected === undefined || typeof v.rateRejected === 'boolean')
+    && optionalFlags(v, ['rateRejected', 'knownRejected', 'rebase', 'stopRequested'])
+    && (v.finalStatus === undefined || typeof v.finalStatus === 'string' && ['FINISHED', 'INCOMPLETE', 'CONTENT_FILTER', 'CONTEXT_LENGTH_EXCEEDED', 'TIMEOUT', 'FAILED'].includes(v.finalStatus))
+    && (v.responseText === undefined || typeof v.responseText === 'string') && (v.reasoning === undefined || typeof v.reasoning === 'string')
     && repairSource(v.repairSource) && path(v.verifiedPath) && path(v.parentPath) && repair(v.repair, v.chatId)
     && budget(v.budget) && (v.usage === undefined || integer(v.usage))
     && (v.kind === undefined ? v.compaction === undefined : v.kind === 'compaction' && anchor(v.compaction)
       && record(v.compaction) && v.compaction.sessionId === v.sessionId && v.compaction.thinking === v.thinking
       && integer(v.compaction.rootId) && integer(v.compaction.oldParentId) && Array.isArray(v.compaction.oldPath) && path(v.compaction.oldPath))
-    && (v.expected === undefined || Array.isArray(v.expected))
+    && (v.expected === undefined || blocks(v.expected))
 }
 
 /** Account metadata is shared; each session owns its confirmed association and active operation. */
@@ -232,6 +237,9 @@ export class LocalStore {
       || !hashes(value.prefix) || !integer(value.generation) || !text(value.sessionId) || !text(value.storeId) || !hash(value.accountKey)
       || !hash(value.instructionsHash) || !hash(value.toolsHash) || !tools(value.tools) || (value.catalogueKnown !== undefined && typeof value.catalogueKnown !== 'boolean')
       || (value.executionTools !== undefined && !tools(value.executionTools)) || !path(value.webPath)
+      || !optionalFlags(value as unknown as Record<string, unknown>, ['needsRebase'])
+      || (value.chatId !== undefined && !text(value.chatId)) || (value.previousChatId !== undefined && !text(value.previousChatId))
+      || (value.lastOperationId !== undefined && !text(value.lastOperationId)) || (value.nativeSeq !== undefined && !integer(value.nativeSeq))
       || (value.parentId !== null && !integer(value.parentId)) || !budget(value.budget)
       || (value.modelType !== undefined && !text(value.modelType)) || (value.thinking !== undefined && typeof value.thinking !== 'boolean')
       || (value.metricsCurrent !== undefined && typeof value.metricsCurrent !== 'boolean')

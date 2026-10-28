@@ -124,13 +124,16 @@ test('unverified A and failed A native flush do not block B or allow stale contr
   } finally { await f.close() }
 })
 
-test('ambiguous accepted response in A remains pending while B progresses', { timeout: 15000 }, async () => {
+test('ambiguous accepted response in A fences the account until fresh terminal proof is available', { timeout: 15000 }, async () => {
   const f = await setup()
   try {
     const fetch = f.web.fetch
     f.web.fetch = (url, options) => new URL(url).searchParams.get('chat_session_id') === 'chat-1' ? new Response('', { status: 401 }) : fetch(url, options)
     await assert.rejects(f.run(input(undefined, 'A')), e => e.code === 'AUTH')
     assert.equal((await f.pending('A')).stage, 'uncertain')
+    await assert.rejects(f.run(input(undefined, 'B')), e => e.code === 'PENDING_OPERATION')
+    assert.equal(f.web.generations.length, 1)
+    f.web.fetch = fetch
     const rb = result(await f.run(input(undefined, 'B'))); f.native.save(rb); await f.engine.reconcile('B')
     assert.equal((await f.engine.inspect('B')).session.chatId, 'chat-2')
     assert.equal((await f.pending('A')).stage, 'uncertain')

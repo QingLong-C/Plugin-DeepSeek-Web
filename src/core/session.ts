@@ -1,5 +1,5 @@
 import { loggedRateRejection } from '../local/rate-rejection.js'
-import type { RequestLease } from '../local/request-gate.js'
+import type { RequestLease, GenerationFlight } from '../local/request-gate.js'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { TokenFreeError, record } from './errors.js'
@@ -59,7 +59,7 @@ export class SessionEngine {
       parentId: repair.parentId, promptHash: repair.promptHash, fileIds: repair.fileIds, verifiedPath: repair.path, finalStatus: 'FINISHED' })
     else await this.update(operation, { stage: 'failed', knownRejected: true })
   }
-  private verify(operation: ActiveOperation, messages: WebMessage[]): WebMessage {
+  private verify(operation: GenerationFlight, messages: WebMessage[]): WebMessage {
     const identity = operation.identity
     const response = messages.find(x => x.id === identity?.responseId)
     const request = messages.find(x => x.id === identity?.requestId)
@@ -78,6 +78,46 @@ export class SessionEngine {
       }
     }
     return response
+  }
+  private flight(operation: ActiveOperation): GenerationFlight {
+    const { id, sessionKey, chatId, parentId, promptHash, fileIds, parentPath, compaction, identity, rateRejected } = operation
+    return { id, sessionKey, chatId, parentId, promptHash, fileIds, parentPath, compaction, identity, rateRejected }
+  }
+  /** The account lease serializes local owners; this durable fence also covers an orphaned server generation. */
+  private async accountIdle(lease: RequestLease, accountKey: string, client: WebTransport, signal: AbortSignal) {
+    if (lease.flights() === undefined) {
+      const flights: GenerationFlight[] = []
+      // Upgrade old installations once, across all native stores sharing this account.
+      for (const key of await this.store.sessionKeys()) {
+        const pending = await this.store.pending(key)
+        if (pending?.accountKey === accountKey && pending.chatId && !pending.verifiedPath && !pending.knownRejected
+          && !['prepared', 'creating'].includes(pending.stage)) flights.push(this.flight(pending))
+      }
+      await lease.initialize(flights)
+    }
+    for (const flight of lease.flights()!) {
+      try {
+        if (flight.rateRejected && flight.identity && await this.rateRequestAbsent(flight, client, signal)) {
+          await lease.finished(flight.id)
+          continue
+        }
+        const messages = await client.history(flight.chatId!, signal)
+        if (!flight.identity) {
+          const requests = messages.filter(m => m.role === 'USER' && m.parentId === flight.parentId && digest(m.content) === flight.promptHash
+            && (flight.fileIds === undefined || canonical(m.fileIds ?? []) === canonical(flight.fileIds)))
+          const responses = requests.length === 1 ? messages.filter(m => m.role === 'ASSISTANT' && m.parentId === requests[0]!.id) : []
+          if (responses.length !== 1) throw new TokenFreeError('Original response cannot be identified.', 'PENDING_OPERATION')
+          flight.identity = { chatId: flight.chatId!, requestId: requests[0]!.id, responseId: responses[0]!.id }
+        }
+        if (!terminal(this.verify(flight, messages).status)) throw new TokenFreeError('Original response is still running.', 'PENDING_OPERATION')
+      } catch (error) {
+        signal.throwIfAborted()
+        await lease.failed(error)
+        this.dependencies.log?.write('operation.pending', { operationId: flight.id, code: 'PENDING_OPERATION', stage: 'account-generation-fence' })
+        throw new TokenFreeError('该账号仍有未确认结束的官网生成；请先核实原请求，未提交新请求。', 'PENDING_OPERATION')
+      }
+      await lease.finished(flight.id)
+    }
   }
   private async discover(operation: ActiveOperation, client: WebTransport, signal: AbortSignal): Promise<void> {
     if (!operation.chatId) throw new TokenFreeError('Chat creation outcome is unknown. It was not repeated.', 'PENDING_OPERATION')
@@ -279,7 +319,7 @@ export class SessionEngine {
     await this.rejectUnsubmitted(operation)
     return true
   }
-  private async rateRequestAbsent(operation: ActiveOperation, client: WebTransport, signal: AbortSignal): Promise<boolean> {
+  private async rateRequestAbsent(operation: GenerationFlight, client: WebTransport, signal: AbortSignal): Promise<boolean> {
     const messages = await client.history(operation.chatId!, signal)
     if (messages.some(m => m.id === operation.identity?.requestId || m.id === operation.identity?.responseId
       || m.role === 'USER' && m.parentId === operation.parentId && digest(m.content) === operation.promptHash)) return false
@@ -381,14 +421,17 @@ export class SessionEngine {
       startBudget()
       if ((await this.store.account()).epoch !== queueEpoch) throw new TokenFreeError('Account changed while queued.', 'ABORTED')
       if (expectedEpoch !== undefined && expectedEpoch !== account.epoch) throw new TokenFreeError('Account changed before admission.', 'ABORTED')
-      if (await this.store.pending(sessionKey)) {
+      const pending = await this.store.pending(sessionKey)
+      if (pending) {
         // Known Web terminal evidence can settle from native records without network. Otherwise inspect only the original response.
         if (!(await this.settle(await this.store.pending(sessionKey)))) {
           await this.verifyOperation(accountKey, client, signal, sessionKey)
           if (await this.store.pending(sessionKey)) throw new TokenFreeError('The previous attempt is not durably settled; no request was repeated.', 'PENDING_OPERATION')
         }
+        await lease.finished(pending.id)
         account = await this.store.account()
       }
+      await this.accountIdle(lease, accountKey, client, signal)
       const native = input.sessionId && !summary ? this.dependencies.native?.current(input.sessionId) : undefined
       if (input.sessionId && !native && !summary) throw new TokenFreeError('Missing native attempt association; no Web request was sent.', 'NATIVE_CONTEXT')
       const previous = input.sessionId ? await this.store.session(sessionKey) : undefined
@@ -404,9 +447,10 @@ export class SessionEngine {
         if (!summary && pressure(previous)) throw new TokenFreeError('Context count reached 50% of the effective budget; native DeepSeek Web compaction must complete first.', 'COMPACTION_REQUIRED')
       }
       client.bindOperation?.(id)
+      const promptLimit = Math.min(this.dependencies.maxPromptChars, previous?.accountKey === accountKey ? previous.budget?.inputCharacterLimit ?? Infinity : Infinity)
       const imageRefs = imageReferences(summary || rebase ? input.messages : input.messages.slice(previous!.prefix.length))
-      const makePrompt = (files: ReadonlyMap<string, string>) => summary ? encodeSummary(input, id, summary.compactionId, Math.min(this.dependencies.maxPromptChars, previous?.budget?.inputCharacterLimit ?? Infinity), files) : encodeInput(input, id, rebase ? 0 : previous!.prefix.length, rebase ? [] : previous!.tools,
-        rebase || instructionHash !== previous!.instructionsHash, this.dependencies.maxPromptChars, Boolean(rebase), previous?.catalogueKnown !== false, files)
+      const makePrompt = (files: ReadonlyMap<string, string>) => summary ? encodeSummary(input, id, summary.compactionId, promptLimit, files) : encodeInput(input, id, rebase ? 0 : previous!.prefix.length, rebase ? [] : previous!.tools,
+        rebase || instructionHash !== previous!.instructionsHash, promptLimit, Boolean(rebase), previous?.catalogueKnown !== false, files)
       // Bound the serialized text before uploading any image; real ids cannot exceed this placeholder.
       makePrompt(new Map(imageRefs.map(ref => [ref.attachmentId, 'file-' + 'x'.repeat(128)])))
       const imageFiles = await prepareImages(this.store.home, accountKey, imageRefs, input.thinking, client, this.dependencies.readImage, lease, signal)
@@ -414,7 +458,7 @@ export class SessionEngine {
       let prompt = makePrompt(imageFiles)
       if(!summary){
         try{learned=await memory.hints(memoryScope)}catch{this.dependencies.log?.write('model.format-memory',{operationId:id,stage:'unavailable',code:'STATE_STORAGE'})}
-        const guided=withRecoveryHints(prompt,learned,this.dependencies.maxPromptChars)
+        const guided=withRecoveryHints(prompt,learned,promptLimit)
         if(guided!==prompt)this.dependencies.log?.write('model.format-memory',{operationId:id,stage:'reuse'})
         prompt=guided
       }
@@ -445,6 +489,7 @@ export class SessionEngine {
         const beforeShown = shown, beforeReasoning = shownReasoning
         await this.update(operation, { stage: 'sending', rateRejected: false, knownRejected: undefined, identity: undefined,
           ...(attachments.length ? { fileIds: repairAttempt ? [] : attachments } : {}) })
+        await lease.started(this.flight(operation))
         let resumes = 0
         let source = summary ? client.editRoot!(operation.chatId!, operation.compaction!.rootId, nextPrompt, input.thinking, signal, operation.fileIds)
           : client.generate(operation.chatId!, operation.parentId, nextPrompt, input.thinking && repairAttempt === 0, signal, operation.fileIds)
@@ -457,12 +502,14 @@ export class SessionEngine {
                 if (event.name === 'hint' && record(event.data) && event.data.type === 'error'
                   && event.data.finish_reason === 'rate_limit_reached' && !raw && !reasoning && shown === beforeShown && shownReasoning === beforeReasoning && !resumes) {
                   await this.update(operation, { rateRejected: true })
+                  await lease.started(this.flight(operation))
                 }
                 continue
               }
               if (event.type === 'ready') {
                 if (event.identity.chatId !== operation.chatId) throw new TokenFreeError('Ready belongs to another chat.', 'WEB_IDENTITY')
-                await this.update(operation, { identity: event.identity, stage: 'receiving' }); continue
+                await this.update(operation, { identity: event.identity, stage: 'receiving' })
+                await lease.started(this.flight(operation)); continue
               }
               const snapshot: WebSnapshot = event.snapshot
               if (snapshot.cleared) {
@@ -494,6 +541,7 @@ export class SessionEngine {
               if ((operation.rateRejected || operation.parentId !== null || operation.compaction)
                 && !(await metadata(active => this.rateRequestAbsent(operation!, client, active)))) throw error
               await this.update(operation, { stage: 'prepared', knownRejected: true, identity: undefined, rateRejected: false })
+              await lease.finished(operation.id)
               await rateWait(error)
               // Recheck the parent after the wait, since a user can edit the website meanwhile.
               if (operation.parentId !== null || operation.compaction) {
@@ -512,6 +560,7 @@ export class SessionEngine {
         const messages = await metadata(active => client.history(operation!.chatId!, active))
         const response = this.verify(operation, messages)
         if (response.status !== 'FINISHED' || response.content !== raw) throw new TokenFreeError('History did not confirm the same completed response.', 'WEB_IDENTITY')
+        await lease.finished(operation.id)
         await this.update(operation, { finalStatus: 'FINISHED', verifiedPath: pathOf(messages, response.id), usage: response.usage, usageSource: 'history', usageObservedAt: new Date().toISOString(),
           identity: { ...operation.identity!, ...(response.modelType ? { modelType: response.modelType } : {}) },
           budget: await metadata(active => this.settingsBudget(client, response.modelType ?? operation!.identity?.modelType, input.thinking, active)) })
@@ -528,7 +577,7 @@ export class SessionEngine {
           if(issue)await remember(issue)
           let plan:ReturnType<typeof planRecovery>
           try {
-            plan = planRecovery(error, raw, input, id, this.dependencies.maxPromptChars, validate, {
+            plan = planRecovery(error, raw, input, id, Math.min(promptLimit, operation.budget?.inputCharacterLimit ?? Infinity), validate, {
               summary: Boolean(summary), shown: Boolean(shown), attempted: Boolean(operation.repair), previous: operation.repair,
               finalPreview: !operation.repair && streamsFinal(input.policy) && decoder.isFinal,
               confirmed: operation.finalStatus === 'FINISHED' && Boolean(operation.identity && operation.verifiedPath),
@@ -551,7 +600,7 @@ export class SessionEngine {
               calls: operation.expected.filter((block):block is Extract<Block,{type:'tool-call'}>=>block.type==='tool-call').map(call=>({name:call.name,arguments:JSON.parse(call.arguments)})),
               invalid_calls: operation.repair.invalidCalls ?? [],
             } : undefined
-            const prompt=encodeProtocolCorrection(input,id,this.dependencies.maxPromptChars,kind,{...issue,reason:error instanceof Error?error.message:'Format validation failed'},raw,constraints)
+            const prompt=encodeProtocolCorrection(input,id,Math.min(promptLimit, operation.budget?.inputCharacterLimit ?? Infinity),kind,{...issue,reason:error instanceof Error?error.message:'Format validation failed'},raw,constraints)
             // The Web generation is complete; repair attempts have their own bounded timers.
             signal=taskSignal;budgetSignal=undefined
             const repaired=await this.dependencies.repairRelay({prompt,operationId:id,signal:taskSignal,validate:check})
@@ -564,7 +613,7 @@ export class SessionEngine {
           if(plan){
             signal.throwIfAborted()
             repairRoute=plan.logStage as RecoverySolution
-            nextPrompt = withRecoveryHints(plan.prompt,learned,this.dependencies.maxPromptChars)
+            nextPrompt = withRecoveryHints(plan.prompt,learned,Math.min(promptLimit, operation.budget?.inputCharacterLimit ?? Infinity))
             await this.update(operation, { stage: 'prepared', expected: plan.expected,
               repair: { attempt: plan.attempt, mode: plan.mode, invalidCalls: plan.invalidCalls, expectedKind: plan.expectedKind, failure: plan.failure,
                 original: operation.identity!, candidateHash: plan.candidateHash, parentId: operation.parentId,
@@ -621,6 +670,7 @@ export class SessionEngine {
       try {
         // for-await cancellation calls return(), not catch(). The server still needs its own stop/confirmation.
         if (operation && !operation.verifiedPath && !operation.knownRejected && ['sending', 'receiving'].includes(operation.stage)) await this.stop(operation, client)
+        if (operation && (operation.verifiedPath || operation.knownRejected)) await lease?.finished(operation.id)
       } finally {
         // A failed stop journal must not strand a live account/session lock.
         try { await lease?.release() } finally { await release() }

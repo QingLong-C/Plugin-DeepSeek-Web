@@ -16,9 +16,17 @@ DeepSeek Web 按当前网页模型及思考状态的有效预算，在累计用�
 
 本仓库独立维护，基于上游 `yuezengwu/dsh-tokenfree` 的 v0.2.0，提交 `6a57b2f9c512bacafe678868c08ef47bb7b484fe`。保留 MIT 许可。`README.upstream.md` 及其他上游设计、测试文档是继承资料，不能当作本维护版重新完成了全部实机验收。
 
-当前源码发行号为 `1.4.0`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
+当前源码发行号为 `1.4.1`。原有 `0.2.0 + 外部兼容入口` 可以继续使用；需要 DSML 修复时同步更新第五个恢复目标 `lib/core/codec.js`，不要因为出现自己的安装包而自动替换正在工作的环境。
 
 当前维护策略是保持目标环境已验收的发行包。后续排障先核对实际安装，不因单次报错、上游发版或官网模型改名自动升级。源码新增修复不等于目标环境已迁移；安装包使用对应 Release 的 SHA256SUMS 核对，纯维护文档提交不替换包、标签或 Release 资产。
+
+## 可靠性边界（v1.4.1）
+
+- 账号队列同时保存尚未确认结束的官网生成核验信息。提交前保存，收到 ready 后绑定实际身份；只有新鲜完整历史确认终态，或明确拒绝且确认未接受，才能释放。释放进程锁、取消、退出账号和宿主重启不能清除此记录。首次升级会导入现有未确认生成；不会回滚冷却、自动重放任务或停止另一会话。
+- 核验记录包含原 chat、父分支、输入哈希、附件及响应身份，即使原会话 journal 缺失也不能绕过。历史不可读、仍在生成或身份/分支不符时返回 PENDING_OPERATION；恢复官网连接后，下次准入重新核实。原生提交仍由原会话独立完成，已确认官网终态而仅待原生落盘的任务不占用官网生成资格。不要通过删除记录或降级运行中的旧包强行放行。
+- 完整原始 schema 由 StrictSchemas 校验；SDK 的子集校验器只接收已通过其自身 assertSupportedJsonSchema 的原规则。兼容清洗仅供装配预检，不将缺失约束的 oneOf 当作等价原规则，避免合法值被重复拒绝；原生工具执行端的检查继续保留。
+- 普通请求、摘要和纠正正文（含恢复提示）使用本地上限与已观测同账号官网字符上限的较小值。首次 bootstrap 尚无对应模型观测时使用本地上限；不推测未知官网上限，不截断任务。
+- 本地文件缺失与内容损坏分开处理。操作布尔标志、状态字符串、交付块及锁票据必须逐字段校验；损坏记录保留并报存储错误，不因真假值判断将其删除或初始化。
 
 ## 响应内容与传输身份分离（v1.4.0）
 
@@ -45,10 +53,10 @@ shasum -a 256 -c SHA256SUMS
 DSH 的插件安装目标是 profile。CLI 可用且目标 profile 没有被桌面占用时，使用其原生安装命令，文件名替换成实际下载路径：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.4.0.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.4.1.tgz
 ```
 
-若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-1.4.0.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
+若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-1.4.1.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
 
 重启后核对实际安装版本、DeepSeek Web 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。此前完整 `qinglong.3` 安装包已在 macOS DSH 0.2.1-rc.3 验证原长对话真实工具往返、双向模型选择和设置卡片；新环境及新修订版的安装仍需分别验收。
 

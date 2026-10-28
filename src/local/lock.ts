@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { privateDirectory, readJson, writeJson } from './files.js'
-import { TokenFreeError } from '../core/errors.js'
+import { record, TokenFreeError } from '../core/errors.js'
 
 interface Ticket { pid: number; id: string; choosing: boolean; order: number }
 const alive = (pid: number) => {
@@ -23,8 +23,8 @@ export async function acquireLock(directory: string, signal: AbortSignal, wait =
       if (!/^[a-f0-9-]{36}\.json$/.test(name)) continue
       const file = join(directory, name)
       const ticket = await readJson<Ticket>(file)
-      if (!ticket) continue
-      if (!Number.isSafeInteger(ticket.pid) || ticket.pid < 1 || ticket.id !== name.slice(0, -5)
+      if (ticket === undefined) continue
+      if (!record(ticket) || !Number.isSafeInteger(ticket.pid) || ticket.pid < 1 || ticket.id !== name.slice(0, -5)
         || typeof ticket.choosing !== 'boolean' || !Number.isSafeInteger(ticket.order) || ticket.order < 0) {
         throw new TokenFreeError('Lock state is invalid; no ownership was assumed.', 'STATE_STORAGE')
       }
