@@ -1,7 +1,7 @@
 import {join} from 'node:path'
 import {readdir} from 'node:fs/promises'
 import {TokenFreeError,record} from '../core/errors.js'
-import {WebResponseFormatError} from '../core/codec.js'
+import {WebResponseFormatError,WebRequestEchoError} from '../core/codec.js'
 import {privateDirectory,readJson,writeJson} from './files.js'
 import {acquireLock} from './lock.js'
 
@@ -25,6 +25,7 @@ const count=(v:unknown):v is number=>Number.isSafeInteger(v)&&Number(v)>=0
 const time=(v:unknown):v is string=>typeof v==='string'&&v.length===24&&Number.isFinite(Date.parse(v))
 const operation=(v:unknown):v is string=>typeof v==='string'&&/^[a-f0-9-]{36}$/.test(v)
 export function formatIssue(error:unknown):FormatIssue|undefined {
+  if(error instanceof WebRequestEchoError)return {stage:'wrapper',code:'WEB_TOOL_FORMAT'}
   if(!(error instanceof TokenFreeError)||!codes.has(error.code))return
   return {stage:error instanceof WebResponseFormatError?error.stage:error.code==='INVALID_TOOL_CALL'?'arguments':error.code==='TOOL_CHOICE'?'policy':error.code==='WEB_TOOL_FORMAT'?'envelope':'output',code:error.code}
 }

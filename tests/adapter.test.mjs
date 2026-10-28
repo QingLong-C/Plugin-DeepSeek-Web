@@ -179,10 +179,15 @@ test('recovered punctuation cannot bypass schema validation or expose a partial 
   } finally { adapter.dispose(); await f.close() }
 })
 
-test('response protocol identity mismatch is never repaired into tools', async () => {
+test('repeated response request echo mismatch exhausts one correction without delivering tools', async () => {
   const f = await setup(), adapter = adapterFor(f)
   f.web.answer = () => ({ protocol_version: 1, request_id: 'different-operation', kind: 'tool', calls: [{ name: tool.name, arguments: {} }] })
-  try { await assert.rejects(collect(adapter.stream({ ...base(), tools: [tool] })), error => error.code === 'WEB_IDENTITY'); assert.equal(f.web.generations.length, 1) }
+  const chunks = []
+  try {
+    await assert.rejects(async () => { for await (const c of adapter.stream({ ...base(), tools: [tool] })) chunks.push(c) }, error => error.code === 'WEB_TOOL_FORMAT')
+    assert.equal(f.web.generations.length, 2)
+    assert.equal(chunks.some(c => c.blockType === 'tool-call' || c.block?.type === 'tool-call'), false)
+  }
   finally { adapter.dispose(); await f.close() }
 })
 

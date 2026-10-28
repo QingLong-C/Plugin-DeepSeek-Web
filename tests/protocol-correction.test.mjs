@@ -96,10 +96,10 @@ test('protocol correction resumes its existing response and preserves native bin
  }
 })
 
-test('identity and filtering never regenerate; unknown tools may regenerate once but never execute',async()=>{
+test('unsupported protocol identity and filtering never regenerate; unknown tools may regenerate once but never execute',async()=>{
  for(const mode of ['identity','unknown','filter']){
   const f=await setup(),a=adapterFor(f)
-  f.web.answer=p=>mode==='identity'?{...answer(p),request_id:'other'}:mode==='unknown'?{...answer(p),calls:[{name:'unknown',arguments:{}}]}:broken
+  f.web.answer=p=>mode==='identity'?{...answer(p),protocol_version:2}:mode==='unknown'?{...answer(p),calls:[{name:'unknown',arguments:{}}]}:broken
   if(mode==='filter')f.web.completion=({ready,text})=>sse(ready+frame(snapshot(text,'CONTENT_FILTER')))
   try{await assert.rejects(()=>collect(a.stream(opts())));assert.equal(f.web.generations.length,mode==='unknown'?2:1)}finally{await a.dispose();await f.close()}
  }

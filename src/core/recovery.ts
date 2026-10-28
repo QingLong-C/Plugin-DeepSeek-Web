@@ -1,6 +1,6 @@
-import { canonical, decodeResponse, encodeFormatRepair, encodeProtocolCorrection, encodeToolCorrection, repeatedTaskCall, WebResponseFormatError } from './codec.js'
+import { canonical, decodeResponse, encodeFormatRepair, encodeProtocolCorrection, encodeToolCorrection, repeatedTaskCall, WebResponseFormatError, WebRequestEchoError } from './codec.js'
 import { record, TokenFreeError, ToolArgumentsError } from './errors.js'
-import { toolJson } from './json.js'
+import { strictJson, toolJson, unfence } from './json.js'
 import { digest, type ActiveOperation } from '../local/store.js'
 import type { Block, ModelInput } from './types.js'
 
@@ -21,7 +21,20 @@ interface Plan {
 const calls = (blocks: Block[]) => blocks.filter(block => block.type === 'tool-call')
 
 /** One admission boundary; a second correction requires verified protocol-to-schema progress. No execution here. */
-export function planRecovery(error: unknown, raw: string, input: ModelInput, id: string, maxChars: number, validate: Validate, admission: Admission): Plan | undefined {
+export function planRecovery(cause: unknown, raw: string, input: ModelInput, id: string, maxChars: number, validate: Validate, admission: Admission): Plan | undefined {
+  if (cause instanceof WebRequestEchoError) {
+    if (admission.summary || !admission.confirmed) return
+    // Only a complete, otherwise valid response from the verified Web operation
+    // can request one metadata-only regeneration. Never rewrite it for delivery,
+    // infer an intent from damaged JSON, or relax actual transport identity guards.
+    try {
+      const candidate = strictJson(unfence(raw))
+      if (!record(candidate) || candidate.protocol_version !== 1 || typeof candidate.request_id !== 'string') return
+      validate(JSON.stringify({ ...candidate, request_id: id }), id)
+    } catch { return }
+  }
+  const error = cause instanceof WebRequestEchoError
+    ? new WebResponseFormatError('Copy the current request identifier exactly; preserve the complete response body.', 'wrapper') : cause
   const outputFailure = error instanceof TokenFreeError && (['INVALID_TOOL_CALL', 'TOOL_CHOICE', 'OUTPUT_FORMAT', 'OUTPUT_SCHEMA'].includes(error.code)
     || admission.attempted && error.code === 'WEB_TOOL_FORMAT')
   if (!(error instanceof WebResponseFormatError) && !outputFailure) return

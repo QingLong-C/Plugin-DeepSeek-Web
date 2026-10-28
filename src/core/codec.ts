@@ -92,6 +92,11 @@ export class WebResponseFormatError extends LlmError {
   constructor(message: string, readonly stage: 'syntax' | 'envelope' | 'tool' | 'wrapper' = 'syntax', readonly intent?: 'final' | 'tool') { super(message, 'WEB_TOOL_FORMAT') }
 }
 
+/** Model-authored echo only; never an official chat/message identity failure. */
+export class WebRequestEchoError extends LlmError {
+  constructor() { super('Response request identifier echo differs from the current operation.', 'WEB_IDENTITY') }
+}
+
 /** Parse one complete DSML batch; never search prose for commands or execute here. */
 function dsmlEnvelope(text: string, tools: readonly Tool[], id?: string, recovered?: () => void): unknown {
   let cursor = 0
@@ -199,7 +204,8 @@ export function decodeResponse(text: string, tools: readonly Tool[] = [], id?: s
 function decodeValue(decoded: unknown, tools: readonly Tool[], id: string | undefined, validate: ((tool: Tool, value: unknown) => void) | undefined, note: (kind?: LocalRepair) => void): Block[] {
   if (!record(decoded)) throw new WebResponseFormatError('Invalid Web response object.', 'envelope')
   let value: Record<string, unknown> = decoded
-  if (id && ((value.request_id !== undefined && value.request_id !== id) || (value.protocol_version !== undefined && value.protocol_version !== 1))) throw new LlmError('Response protocol identity changed.', 'WEB_IDENTITY')
+  if (id && value.protocol_version !== undefined && value.protocol_version !== 1) throw new LlmError('Response protocol identity changed.', 'WEB_IDENTITY')
+  if (id && value.request_id !== undefined && value.request_id !== id) throw new WebRequestEchoError()
   // Infer only a unique declared branch; contradictory bodies still fail the full contract.
   if (value.kind === undefined) {
     const toolBody = Array.isArray(value.calls) && value.calls.length > 0
@@ -250,7 +256,7 @@ function decodeValue(decoded: unknown, tools: readonly Tool[], id: string | unde
 export function encodeFormatRepair(options: CodecOptions, rejected: string, maxChars: number, id: string = randomUUID()): string {
   // Only a complete unambiguous existing intent can reach this path.
   decodeResponse(rejected, options.tools)
-  const prompt = `${protocol}\nFORMAT_REPAIR ${id}: preserve the following complete kind/text or calls EXACTLY. Add protocol_version=1 and request_id=${JSON.stringify(id)} only. No new task or tool.\nCANDIDATE_JSON:\n${rejected}`
+  const prompt = `${protocol}\nFORMAT_REPAIR ${id}: preserve the following complete kind/text or calls EXACTLY. Set protocol_version=1 and request_id=${JSON.stringify(id)} only. No new task or tool.\nCANDIDATE_JSON:\n${rejected}`
   if (prompt.length > maxChars) throw new LlmError('Formatting input exceeds the local character limit.', 'INPUT_TOO_LARGE')
   return prompt
 }
