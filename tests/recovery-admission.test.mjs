@@ -22,11 +22,11 @@ test('a rejected correction kind reaches relay with original tool intent and ful
  try{const events=await collect(engine.run(i,f.accountKey,f.web.client(),AbortSignal.timeout(5000),(raw,op)=>decodeResponse(raw,i.tools,op)));assert.equal(relayCalls,1);assert.equal(f.web.generations.length,2);assert.equal(events.find(e=>e.type==='result').blocks.filter(b=>b.type==='tool-call').length,1)}finally{await f.close()}
 })
 
-test('complete encoded envelope and missing metadata normalize without changing arguments',()=>{
+test('complete encoded envelope and inferred intent preserve arguments; routing metadata is optional',()=>{
  for(const value of [body,{...body,protocol_version:1},{...body,request_id:id},{calls:body.calls},wrapped]){
   for(const raw of [JSON.stringify(value),JSON.stringify(JSON.stringify(value))]){
    const recovered=[];const blocks=decodeResponse(raw,[tool],id,undefined,k=>recovered.push(k));assert.equal(blocks.length,1);assert.equal(blocks[0].name,'inspect');assert.deepEqual(JSON.parse(blocks[0].arguments),{path:'existing'});
-   if(raw!==JSON.stringify(wrapped))assert(recovered.length>0)
+   assert.equal(recovered.length>0,raw!==JSON.stringify(value)||value.kind===undefined)
   }
  }
 })
@@ -39,10 +39,11 @@ test('DSML redundant matching tool metadata keeps its complete arguments and rep
  assert.throws(()=>decodeResponse(dsml(arg('arguments',{path:'existing'})+arg('name','inspect',true)),[declared],id))
 })
 
-test('local recovery never extracts commands from prose, resolves contradictory intent or overwrites identity',()=>{
+test('local recovery never extracts commands from prose or resolves contradictory intent; metadata has no authority',()=>{
  const raw=JSON.stringify(wrapped)
  for(const s of ['Do not execute: '+raw,raw+' do not execute',raw+raw,JSON.stringify(JSON.stringify(raw)),JSON.stringify({calls:body.calls,text:'both kinds'}),JSON.stringify({...body,calls:[]}),'{"kind":"final","text":"a","text":"b"}'])assert.throws(()=>decodeResponse(s,[tool],id))
- for(const v of [{...body,request_id:'other'},{...body,protocol_version:2},{...wrapped,request_id:'other'}])assert.throws(()=>decodeResponse(JSON.stringify(v),[tool],id),e=>e.code==='WEB_IDENTITY')
+ for(const v of [{...body,request_id:'other'},{...wrapped,request_id:'other'}])assert.equal(decodeResponse(JSON.stringify(v),[tool],id)[0].id,`tokenfree_${id}_0`)
+ assert.throws(()=>decodeResponse(JSON.stringify({...body,protocol_version:2}),[tool],id),e=>e.code==='WEB_TOOL_FORMAT')
 })
 
 test('relay receives the original frozen batch after a correction changes a valid call',async()=>{

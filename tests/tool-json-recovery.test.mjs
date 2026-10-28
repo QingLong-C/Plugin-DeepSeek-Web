@@ -47,7 +47,7 @@ test('syntax recovery rejects ambiguous/incomplete values, duplicate keys, extra
   assert.throws(() => decodeResponse(wrap(raw).slice(0, -3), [tool], 'op'))
   assert.throws(() => decodeResponse(wrap(raw + '}').replace('name="bash"', 'name="missing"'), [tool], 'op'))
   assert.throws(() => decodeResponse(wrap(raw + '}'), [tool], 'op', () => { throw new Error('schema rejection') }), /schema rejection/)
-  assert.throws(() => decodeResponse('{"protocol_version":1,"request_id":"other","kind":"tool","calls":[{"name":"bash","arguments":{}}]}}', [tool], 'op'), error => error.code === 'WEB_IDENTITY')
+  assert.throws(() => decodeResponse('{"protocol_version":99,"request_id":"other","kind":"tool","calls":[{"name":"bash","arguments":{}}]}}', [tool], 'op'), error => error.code === 'WEB_TOOL_FORMAT')
   assert.throws(() => strictJson(raw + '}'), /Trailing/)
 })
 

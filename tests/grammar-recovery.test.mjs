@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {toolJson,strictJson} from '../lib/core/json.js'
 import {decodeResponse} from '../lib/core/codec.js'
 import {TokenFreeAdapter,PROVIDER,MODEL} from '../lib/dsh/adapter.js'
-import {setup,collect} from './helpers/fixture.mjs'
+import {setup,collect,frame,snapshot,sse} from './helpers/fixture.mjs'
 import {StrictSchemas} from '../lib/dsh/strict-schema.js'
 
 const tool={name:'inspect',description:'Inspect an existing artifact',parameters:{type:'object',additionalProperties:false,required:['command'],properties:{command:{type:'string'}}}}
@@ -64,17 +64,18 @@ test('ambiguous structure, duplicate keys, missing values and damaged strings ne
   '{"a":"unfinished}', '{"a":"bad\\q"}', '{"a":undefined}',
   '{"a":1} {"b":2}', 'prose {"a":1}', '{"a":1;"b":2}',
  ])assert.throws(()=>toolJson(raw),raw)
- assert.throws(()=>decodeResponse(broken('wrong'),[tool],'op'),e=>e.code==='WEB_IDENTITY')
+ assert(decodeResponse(broken('wrong'),[tool],'op').every((call,index)=>call.id===`tokenfree_op_${index}`))
  const bad=broken('op').replace('"inspect only"','false')
  assert.throws(()=>decodeResponse(bad,[tool],'op',(_,a)=>{assert.equal(typeof a.command,'string')}))
 })
 
-test('identity errors remain terminal even when syntax has multiple equivalent structural interpretations',async()=>{
+test('official identity errors remain terminal before grammar recovery of legacy model echoes',async()=>{
  const declared={name:'inspect',description:'Read only',parameters:{type:'object',properties:{description:{type:'string'},command:{type:'string'}}}}
  const raw=id=>JSON.stringify({protocol_version:1,request_id:id,kind:'tool',calls:[{name:'inspect',arguments:{description:'first',command:'read only'}},{name:'inspect',arguments:{command:'second'}}]}).replace('}},{"name"','},{"name"')
- assert.throws(()=>decodeResponse(raw('wrong'),[declared],'op'),e=>e.code==='WEB_IDENTITY')
+ assert(decodeResponse(raw('wrong'),[declared],'op').every((call,index)=>call.id===`tokenfree_op_${index}`))
  const f=await setup(),a=new TokenFreeAdapter({}, {store:f.store,native:f.native,credential:async()=>({token:'fixture',accountId:'fixture-owner'}),client:(_,c)=>f.web.client(f.log,c.operationId)}),chunks=[]
  f.web.answer=()=>raw('wrong')
+ f.web.completion=({ready,text,assistant})=>{assistant.fragments[0].content='different official history';return sse(ready+frame(snapshot(text)))}
  try{
   await assert.rejects(async()=>{for await(const c of a.stream({provider:PROVIDER,model:MODEL,messages:[{role:'user',content:[{type:'text',text:'Inspect only'}]}],tools:[declared]}))chunks.push(c)},e=>e.code==='WEB_IDENTITY')
   assert.equal(f.web.generations.length,1);assert.equal(chunks.some(c=>c.block?.type==='tool-call'),false)

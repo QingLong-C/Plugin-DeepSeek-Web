@@ -18,7 +18,7 @@ test('bounded envelope framing composes with punctuation recovery and preserves 
  }
  assert.deepEqual(JSON.parse(decodeResponse('<'+raw.slice(0,-1)+',}}>',[tool],'op')[0].arguments),args)
  for(const raw of ['<'.repeat(9)+JSON.stringify(good()),'<example>'+JSON.stringify(good()),'note '+JSON.stringify(good()),JSON.stringify(good())+';','<'+JSON.stringify(good())+JSON.stringify(good()),'<{"kind":"tool","kind":"tool"}>'])assert.throws(()=>decodeResponse(raw,[tool],'op'))
- assert.throws(()=>decodeResponse('<'+JSON.stringify(good('other')),[tool],'op'),e=>e.code==='WEB_IDENTITY')
+ assert.equal(decodeResponse('<'+JSON.stringify(good('other')),[tool],'op')[0].id,'tokenfree_op_0')
 })
 
 test('schema-declared fields at call level move losslessly into the single arguments object',()=>{

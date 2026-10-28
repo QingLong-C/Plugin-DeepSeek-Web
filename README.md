@@ -4,7 +4,7 @@
 
 本仓库为私有项目，下载和克隆需要有访问权限的 GitHub 账号。
 
-当前版本：**v1.3.3** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.4.0** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 ## 项目用途
 
@@ -23,7 +23,7 @@
 3. 点击「使用」，或选择 **DeepSeek Web**；点击「使用」也会设为当前 profile 的默认模型。
 4. 在 DSH 中正常对话和调用工具。当前任务仍运行时，符合恢复条件的官网限流会自动等待后继续，无需手动发送“继续”。
 
-v1.3.3 修复模型抄错请求编号导致的工具步骤中断；仅在官网历史核验和完整规则校验通过后进行一次纠正，不放宽真实会话身份检查。
+v1.4.0 将响应内容与请求归属分离：模型只输出回答或工具调用，请求归属和工具调用 ID 由插件根据已核验的官网响应确定。旧对话中的编号回显继续兼容，抄错编号无需额外生成；全部正文、参数和真实会话校验继续执行。
 
 ## 注意事项
 
@@ -57,7 +57,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.3.3.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.4.0.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。

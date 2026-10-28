@@ -4,7 +4,7 @@ import { encodeInput, catalogueHash } from '../lib/core/codec.js'
 import { StrictSchemas } from '../lib/dsh/strict-schema.js'
 import { input, tool, payload } from './helpers/fixture.mjs'
 
-test('each bootstrap and delta carries a bounded exact envelope contract bound to current tools and request', () => {
+test('each bootstrap and delta carries a content-only envelope contract bound to current tools', () => {
   const schemas = new StrictSchemas()
   for (const mode of ['auto', 'none', 'required', 'named']) {
     for (const bootstrap of [true, false]) {
@@ -14,8 +14,8 @@ test('each bootstrap and delta carries a bounded exact envelope contract bound t
       assert.equal(p.response_contract.enforcement, 'local-validation')
       assert.equal(p.response_contract.tool_catalogue_version, catalogueHash(i.tools))
       const schema = p.response_contract.envelope_schema
-      const final = { protocol_version: 1, request_id: 'request-fixture', kind: 'final', text: 'ok' }
-      const call = { protocol_version: 1, request_id: 'request-fixture', kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
+      const final = { kind: 'final', text: 'ok' }
+      const call = { kind: 'tool', calls: [{ name: tool.name, arguments: {} }] }
       if (mode === 'auto' || mode === 'none') schemas.check(schema, final)
       else assert.throws(() => schemas.check(schema, final))
       if (mode !== 'none') schemas.check(schema, call)

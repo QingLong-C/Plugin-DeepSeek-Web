@@ -1,7 +1,7 @@
 import {join} from 'node:path'
 import {readdir} from 'node:fs/promises'
 import {TokenFreeError,record} from '../core/errors.js'
-import {WebResponseFormatError,WebRequestEchoError} from '../core/codec.js'
+import {WebResponseFormatError} from '../core/codec.js'
 import {privateDirectory,readJson,writeJson} from './files.js'
 import {acquireLock} from './lock.js'
 
@@ -9,9 +9,9 @@ const guides = {
   'local-syntax': 'Validate JSON punctuation and string escaping before returning; no trailing commas or characters outside the complete root.',
   'tool-arguments': 'Check the current original tool schemas: required fields, exact types and nesting. Do not coerce values or invent missing task facts.',
   'tool-protocol': 'When tools are needed, serialize their exact available names and arguments as a tool envelope; never claim unexecuted results.',
-  'response-wrapper': 'Use protocol_version=1 and copy the current request_id exactly; never reuse identifiers from older responses.',
+  'response-wrapper': 'Return only the content envelope: kind plus text or calls. Routing metadata belongs to the host and must not be echoed.',
   'final-response': 'For a final answer, put the complete answer in JSON final.text with escaped newlines; follow the current output schema.',
-  'contract-envelope': 'Emit the complete envelope with protocol_version=1, the current request_id and an explicit kind matching its calls or text.',
+  'contract-envelope': 'Emit one complete content envelope with an explicit kind matching its calls or text; omit routing metadata.',
   'response-protocol': 'Return one complete JSON envelope under the current response_policy. Keep tool calls separate from final answers.',
 } as const
 export type RecoverySolution = keyof typeof guides
@@ -25,7 +25,6 @@ const count=(v:unknown):v is number=>Number.isSafeInteger(v)&&Number(v)>=0
 const time=(v:unknown):v is string=>typeof v==='string'&&v.length===24&&Number.isFinite(Date.parse(v))
 const operation=(v:unknown):v is string=>typeof v==='string'&&/^[a-f0-9-]{36}$/.test(v)
 export function formatIssue(error:unknown):FormatIssue|undefined {
-  if(error instanceof WebRequestEchoError)return {stage:'wrapper',code:'WEB_TOOL_FORMAT'}
   if(!(error instanceof TokenFreeError)||!codes.has(error.code))return
   return {stage:error instanceof WebResponseFormatError?error.stage:error.code==='INVALID_TOOL_CALL'?'arguments':error.code==='TOOL_CHOICE'?'policy':error.code==='WEB_TOOL_FORMAT'?'envelope':'output',code:error.code}
 }

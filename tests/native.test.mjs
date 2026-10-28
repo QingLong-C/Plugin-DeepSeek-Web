@@ -16,6 +16,7 @@ import { setup, payload, frame, snapshot } from './helpers/fixture.mjs'
 
 test('actual DSH AgentLoop persists two turns and reuses Web chat through public native events and flush', { timeout: 15000 }, async () => {
   const f = await setup(), ctx = new Context()
+  f.web.answer = (_, __, n) => ({ ...(n === 1 ? { protocol_version: 1, request_id: 'stale-model-echo' } : {}), kind: 'final', text: 'answer' })
   let adapter, flushes = 0
   const file = join(f.home, 'native-events.json')
   try {

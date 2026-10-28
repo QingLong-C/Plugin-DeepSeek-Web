@@ -179,14 +179,15 @@ test('recovered punctuation cannot bypass schema validation or expose a partial 
   } finally { adapter.dispose(); await f.close() }
 })
 
-test('repeated response request echo mismatch exhausts one correction without delivering tools', async () => {
+test('legacy model echo never overrides host operation binding or creates a correction request', async () => {
   const f = await setup(), adapter = adapterFor(f)
   f.web.answer = () => ({ protocol_version: 1, request_id: 'different-operation', kind: 'tool', calls: [{ name: tool.name, arguments: {} }] })
   const chunks = []
   try {
-    await assert.rejects(async () => { for await (const c of adapter.stream({ ...base(), tools: [tool] })) chunks.push(c) }, error => error.code === 'WEB_TOOL_FORMAT')
-    assert.equal(f.web.generations.length, 2)
-    assert.equal(chunks.some(c => c.blockType === 'tool-call' || c.block?.type === 'tool-call'), false)
+    for await (const c of adapter.stream({ ...base(), tools: [tool] })) chunks.push(c)
+    assert.equal(f.web.generations.length, 1)
+    const call = chunks.find(c => c.type === 'block-end' && c.block.type === 'tool-call').block
+    assert.equal(call.id, `tokenfree_${payload(f.web.generations[0].prompt).request_id}_0`)
   }
   finally { adapter.dispose(); await f.close() }
 })

@@ -10,6 +10,12 @@ import {TokenFreeAdapter,PROVIDER,MODEL} from '../lib/dsh/adapter.js'
 import {setup,collect,tool} from './helpers/fixture.mjs'
 
 const scope='a'.repeat(64),other='b'.repeat(64),issue={stage:'syntax',code:'WEB_TOOL_FORMAT'}
+test('historical recovery solution names render current content-only rules without reviving echo requirements',()=>{
+ const prompt=withRecoveryHints('CURRENT_CONTENT_CONTRACT',['response-wrapper','contract-envelope'],10000)
+ assert(prompt.includes('content envelope'))
+ assert(!/copy the current request_id|Use protocol_version=1|current request_id and an explicit/.test(prompt))
+ assert(prompt.endsWith('CURRENT_CONTENT_CONTRACT'))
+})
 test('recovery memory persists pending, validated solutions, recurrence and schema isolation without task content',async()=>{
  const home=await mkdtemp(join(tmpdir(),'tokenfree-memory-'))
  try{

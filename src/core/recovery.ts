@@ -1,6 +1,6 @@
-import { canonical, decodeResponse, encodeFormatRepair, encodeProtocolCorrection, encodeToolCorrection, repeatedTaskCall, WebResponseFormatError, WebRequestEchoError } from './codec.js'
+import { canonical, decodeResponse, encodeFormatRepair, encodeProtocolCorrection, encodeToolCorrection, repeatedTaskCall, WebResponseFormatError } from './codec.js'
 import { record, TokenFreeError, ToolArgumentsError } from './errors.js'
-import { strictJson, toolJson, unfence } from './json.js'
+import { toolJson } from './json.js'
 import { digest, type ActiveOperation } from '../local/store.js'
 import type { Block, ModelInput } from './types.js'
 
@@ -21,20 +21,7 @@ interface Plan {
 const calls = (blocks: Block[]) => blocks.filter(block => block.type === 'tool-call')
 
 /** One admission boundary; a second correction requires verified protocol-to-schema progress. No execution here. */
-export function planRecovery(cause: unknown, raw: string, input: ModelInput, id: string, maxChars: number, validate: Validate, admission: Admission): Plan | undefined {
-  if (cause instanceof WebRequestEchoError) {
-    if (admission.summary || !admission.confirmed) return
-    // Only a complete, otherwise valid response from the verified Web operation
-    // can request one metadata-only regeneration. Never rewrite it for delivery,
-    // infer an intent from damaged JSON, or relax actual transport identity guards.
-    try {
-      const candidate = strictJson(unfence(raw))
-      if (!record(candidate) || candidate.protocol_version !== 1 || typeof candidate.request_id !== 'string') return
-      validate(JSON.stringify({ ...candidate, request_id: id }), id)
-    } catch { return }
-  }
-  const error = cause instanceof WebRequestEchoError
-    ? new WebResponseFormatError('Copy the current request identifier exactly; preserve the complete response body.', 'wrapper') : cause
+export function planRecovery(error: unknown, raw: string, input: ModelInput, id: string, maxChars: number, validate: Validate, admission: Admission): Plan | undefined {
   const outputFailure = error instanceof TokenFreeError && (['INVALID_TOOL_CALL', 'TOOL_CHOICE', 'OUTPUT_FORMAT', 'OUTPUT_SCHEMA'].includes(error.code)
     || admission.attempted && error.code === 'WEB_TOOL_FORMAT')
   if (!(error instanceof WebResponseFormatError) && !outputFailure) return
@@ -64,7 +51,7 @@ export function planRecovery(cause: unknown, raw: string, input: ModelInput, id:
     if (refine) checkRecoveryResult(previous, undefined, input, expected)
     const errors: (ToolArgumentsError['issue'] & { call: number; name: string })[] = []
     for (const [index, call] of batch.entries()) {
-      try { validate(JSON.stringify({ protocol_version: 1, request_id: id, kind: 'tool', calls: [{ name: call.name, arguments: JSON.parse(call.arguments) }] }), id) }
+      try { validate(JSON.stringify({ kind: 'tool', calls: [{ name: call.name, arguments: JSON.parse(call.arguments) }] }), id) }
       catch (issue) { if (!(issue instanceof ToolArgumentsError)) throw issue; errors.push({ ...issue.issue, call: index, name: call.name }) }
     }
     if (!errors.length) throw error
@@ -76,7 +63,7 @@ export function planRecovery(cause: unknown, raw: string, input: ModelInput, id:
     const value = toolJson(raw, undefined, true)
     if (!record(value)) throw error
     try {
-      validate(JSON.stringify({ ...value, protocol_version: 1, request_id: id }), id)
+      validate(JSON.stringify(value), id)
       const expected = decodeResponse(raw, input.tools)
       return { attempt, prompt: encodeFormatRepair({ messages: [], tools: input.tools }, raw, maxChars, id), expected, candidateHash: digest(canonical(expected)), failure, logStage: 'response-wrapper' }
     } catch (issue) {

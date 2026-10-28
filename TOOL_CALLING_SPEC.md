@@ -66,13 +66,11 @@ sequenceDiagram
 
 ## 响应协议
 
-普通正文和工具请求采用互斥分支。模型按 kind、protocol、request_id、text、calls 的顺序输出；字段顺序有助于正文流式，完整解析仍按 JSON 对象语义处理。
+普通正文和工具请求采用互斥分支。模型先输出 kind，再输出 text 或 calls；字段顺序有助于正文流式，完整解析仍按 JSON 对象语义处理。
 
 ```json
 {
   "kind": "tool",
-  "protocol": "tokenfree/1",
-  "request_id": "本次生成关联值",
   "text": "我先读取这个文件。",
   "calls": [
     { "name": "read", "arguments": { "file_path": "README.md" } }
@@ -82,16 +80,16 @@ sequenceDiagram
 
 示例名称和参数仅用于说明；实际 prompt 按当前 DSH 声明提供。text 可省略，不能包含自称已完成的工具结果。每个调用只允许 name 与 arguments；arguments 必须是 JSON 对象，不能是包着 JSON 的字符串、XML 或代码块。
 
-最终回答为同版本、同 request_id 的 `kind=final` 与 text，不带 calls。用户明确需要 JSON/schema 最终结果时仍使用 final 分支，按已确认的结构化输出规格校验 text 内容。
+最终回答为 `kind=final` 与 text，不带 calls。用户明确需要 JSON/schema 最终结果时仍使用 final 分支，按已确认的结构化输出规格校验 text 内容。
 
-协议关联值在网页 prompt 中可见，仅用于排除串流、错误分支或过期响应，不是授权密钥，也不保证能阻止提示注入。工具权限依赖 DSH 的执行边界。
+请求归属由插件根据官网 chat/message/父分支及完整历史内容确定，不由模型抄写的字段决定。模型不再输出 request_id 或 protocol_version；旧响应可兼容字符串编号及版本 1，但它们不参与原生调用 ID 和信任判断。工具权限依赖 DSH 的执行边界。
 
 ## 批次校验与交付
 
 整个工具响应缓冲到官网响应结束并核实成功后，按以下顺序处理，全部通过后才交付任何可执行块：
 
 1. **终态**：核实当前 chat/response 身份、无撤回或过滤、没有断流未决状态；单独的 HTTP 200、finish 事件或连接关闭不足以通过。
-2. **协议**：只接受一个根对象，无多段对象、尾随内容、重复键或未声明的协议字段；kind、版本、request_id 一致。不从普通回答、示例代码、思考或搜索片段中抽取工具 JSON。
+2. **协议**：只接受一个根对象，无多段对象、尾随内容、重复键或未声明的协议字段；kind 与正文分支一致。不从普通回答、示例代码、思考或搜索片段中抽取工具 JSON。
 3. **批次**：calls 长度为 1–8；不截取前 8 个继续执行。一次响应中任意一项失败，整批不交付。
 4. **名称与参数**：名称精确匹配本轮允许列表；arguments 按该名称的 schema 校验 required、类型、数组、enum、oneOf 及 additionalProperties 等约束。schema 允许额外属性时不额外禁止；schema 禁止时不静默删除。
 5. **本地策略**：核对禁用、下一次必须使用工具或指定工具等策略，以及本次请求用途。compaction、session-title 即使带了历史工具定义，也不允许交付调用。
