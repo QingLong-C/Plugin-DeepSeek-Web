@@ -458,7 +458,7 @@ test('native summary rate rejection waits and retries only the original summary 
 })
 
 
-test('automatic native compaction restores full local documents before the new Web bootstrap', { timeout: 20000 }, async () => {
+test('automatic native compaction restores AGENTS without preloading task-owned routing', { timeout: 20000 }, async () => {
   const f = await harness({ documents: true })
   try {
     await f.ask('Remember OLD_FACT. ' + 'original context '.repeat(180))
@@ -470,7 +470,7 @@ test('automatic native compaction restores full local documents before the new W
     const restored = next.messages.filter(m => m.context && m.content.some(b => b.text?.includes('Document: ~/.dsh/AGENTS.md')))
     assert.equal(restored.length, 1)
     assert.ok(JSON.stringify(restored).includes('Retain WORKSPACE_RULE after compaction.'))
-    assert.ok(JSON.stringify(restored).includes('| unrelated | unrelated-skill |'))
+    assert.equal(JSON.stringify(next.messages).includes('| unrelated | unrelated-skill |'), false)
     assert.equal(f.agent.session.snapshotEvents().filter(e => e.type === 'tool/call').length, 0)
   } finally { await f.close() }
 })

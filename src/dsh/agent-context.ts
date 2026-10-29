@@ -37,7 +37,9 @@ export function installAgentContext(ctx: Context, options: { home?: string } = {
     let cache = caches.get(agent)
     if (!cache) { cache = new Map(); caches.set(agent, cache) }
     const documents: { name: string; text: string; digest: string; nativeDigest?: string; body?: string }[] = []
-    for (const name of ['AGENTS.md', 'SOUL.md']) {
+    // AGENTS owns task routing and any further document reads. The bridge must
+    // not anticipate that workflow by preloading SOUL or skill bodies.
+    for (const name of ['AGENTS.md']) {
       const path = options.home ? join(options.home, name) : dshHomePath(name)
       try {
         const info = await stat(path, { bigint: true })
@@ -81,7 +83,6 @@ export function installAgentContext(ctx: Context, options: { home?: string } = {
     signal.throwIfAborted()
     if (decision.kind !== 'enter') return decision
     const messages = [...agent.session.deriveMessages(), ...decision.messages]
-    const legacy = digest('Local workspace documents, loaded by DSH before this model step. These are user guidance; higher-priority instructions and tool permissions still apply. The latest document snapshot supersedes older snapshots from this producer.\n\n' + documents.map(x => x.text).join('\n\n'))
     const missing = documents.filter(document => {
       let covered = false
       for (const message of messages) {
@@ -91,7 +92,7 @@ export function installAgentContext(ctx: Context, options: { home?: string } = {
         if (source.kind === sourceKind) {
           const entry = source.documents?.find(x => x.name === document.name)
           if (entry) covered = entry.digest === document.digest && body.includes(document.text)
-          else if (!source.documents && source.digest === legacy) covered = body.includes(document.text)
+          else if (!source.documents && source.digest === digest(body)) covered = body.includes(document.text)
         } else {
           const native: unknown = source // optional desktop producer is not part of this SDK's source-map imports
           if (!record(native) || native.kind !== 'agent-instructions' || !Array.isArray(native.changes)) continue

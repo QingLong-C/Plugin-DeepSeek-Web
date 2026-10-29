@@ -18,7 +18,7 @@ import { DshBoundary } from '../lib/dsh/native.js'
 import { TokenFreeAdapter, PROVIDER, MODEL } from '../lib/dsh/adapter.js'
 import { setup, payload } from './helpers/fixture.mjs'
 
-test('native new sessions load literal workspace documents before generation, once per effective context; changes refresh without model tool calls', async () => {
+test('native sessions preload only AGENTS; SOUL is task-owned and changes do not trigger injection', async () => {
   const f = await setup(), ctx = new Context()
   const home = await mkdtemp(join(tmpdir(), 'tokenfree-rules-'))
   let adapter
@@ -45,7 +45,8 @@ test('native new sessions load literal workspace documents before generation, on
     const first = payload(f.web.generations[0].prompt)
     const source = first.messages.flatMap(m => m.content).map(c => c.text ?? '').join('\n')
     assert.ok(source.includes('keep {{literal}} unchanged.'))
-    assert.ok(source.includes('| unrelated task | unrelated |'))
+    assert.equal(source.includes('| unrelated task | unrelated |'), false)
+    assert.equal(source.includes('Document: ~/.dsh/SOUL.md'), false)
     const contexts = () => agent.session.snapshotEvents().filter(e => e.type === 'user/message' && e.data.source.kind === 'tokenfree-workspace-documents')
     assert.equal(contexts().length, 1)
     await ask('Continue with a normal answer.')
@@ -53,8 +54,12 @@ test('native new sessions load literal workspace documents before generation, on
     assert.equal(payload(f.web.generations[1].prompt).mode, 'delta')
     await writeFile(join(home, 'SOUL.md'), 'Updated routing document.\n')
     await ask('Check the current convention again.')
+    assert.equal(contexts().length, 1)
+    assert.equal(f.web.generations[2].prompt.includes('Updated routing document.'), false)
+    await writeFile(join(home, 'AGENTS.md'), 'Updated project convention.\n')
+    await ask('Check the changed convention.')
     assert.equal(contexts().length, 2)
-    assert.ok(f.web.generations[2].prompt.includes('Updated routing document.'))
+    assert.ok(f.web.generations[3].prompt.includes('Updated project convention.'))
     assert.equal(agent.session.snapshotEvents().filter(e => e.type === 'tool/call').length, 0, 'file preloading must not invent model tool calls')
   } finally { await adapter?.dispose(); await ctx.fiber.dispose(); await f.close(); await rm(home, { recursive: true, force: true }) }
 })
@@ -74,6 +79,10 @@ test('document loader leaves other providers alone and reports unreadable docume
     const missing = await handler(request, async () => result)
     assert.equal(missing.messages.length, 1)
     assert.ok(missing.messages[0].content[0].text.includes('missing'))
+    await writeFile(join(home, 'AGENTS.md'), 'A valid global entry.\n')
+    await writeFile(join(home, 'SOUL.md'), Buffer.from([0xc3, 0x28]))
+    const valid = await handler(request, async () => result)
+    assert.deepEqual(valid.messages[0].source.documents.map(x => x.name), ['AGENTS.md'], 'invalid optional routing must not be read or block admission')
     await writeFile(join(home, 'AGENTS.md'), 'x'.repeat(65537))
     await assert.rejects(() => handler(request, async () => result), e => e.code === 'WORKSPACE_DOCUMENT')
     const abort = new AbortController(); abort.abort()
@@ -126,7 +135,7 @@ test('pending model selection determines document admission before a request hea
   assert.equal(isWebAgent(agent), false)
 })
 
-test('reuse complete native guidance per document; restore only missing effective context and refresh changed or removed files', async () => {
+test('reuse native AGENTS without loading SOUL; restore AGENTS after compaction and refresh changes or removal', async () => {
   const home = await mkdtemp(join(tmpdir(), 'tokenfree-native-rules-'))
   let handler
   installAgentContext({ on(_, callback) { handler = callback } }, { home })
@@ -138,17 +147,16 @@ test('reuse complete native guidance per document; restore only missing effectiv
   const request = { agent, signal: new AbortController().signal }
   const enter = messages => handler(request, async () => ({ kind: 'enter', messages }))
   try {
-    await writeFile(join(home, 'AGENTS.md'), instructions)
+    await writeFile(join(home, 'entry.md'), instructions)
+    await symlink(join(home, 'entry.md'), join(home, 'AGENTS.md'))
     await writeFile(join(home, 'route.md'), 'Routing body.\n')
     await symlink(join(home, 'route.md'), join(home, 'SOUL.md'))
     const first = await enter([host]) // host middleware may inject in this same admission decision
-    assert.equal(first.messages.length, 2)
-    const route = first.messages.at(-1)
-    assert.equal(route.content[0].text.includes(instructions), false, 'do not duplicate a complete native AGENTS body')
-    assert.ok(route.content[0].text.includes('Routing body.'))
+    assert.equal(first.messages.length, 1, 'reuse native AGENTS and do not preload routing')
+    assert.equal(first.messages[0], host)
     effective.push(...first.messages)
     assert.equal((await enter([])).messages.length, 0)
-    effective = [route] // native compaction retained SOUL but discarded AGENTS
+    effective = [] // compaction discarded AGENTS
     const restored = await enter([])
     assert.ok(restored.messages[0].content[0].text.includes(instructions))
     assert.equal(restored.messages[0].content[0].text.includes('Routing body.'), false)
@@ -157,7 +165,7 @@ test('reuse complete native guidance per document; restore only missing effectiv
     const updated = await enter([])
     assert.ok(updated.messages[0].content[0].text.includes('Updated convention.'))
     effective.push(...updated.messages)
-    await rm(join(home, 'SOUL.md'))
+    await rm(join(home, 'AGENTS.md'))
     const missing = await enter([])
     assert.ok(missing.messages[0].content[0].text.includes('Status: missing'))
     effective.push(...missing.messages)

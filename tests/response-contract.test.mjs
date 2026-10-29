@@ -12,8 +12,7 @@ test('every step advertises actual host tools independently of skills and preser
     assert.deepEqual(p.agent_capabilities.tool_names, [tool.name])
     assert.equal(p.agent_capabilities.execution, 'dsh-host')
     assert.equal(p.agent_capabilities.skill_required, false)
-    assert.ok(prompt.includes('A matching skill is not required'))
-    assert.ok(prompt.includes('discover applicable skills'))
+    assert.equal(prompt.includes('discover applicable skills'), false, 'the bridge must not impose a skill-discovery workflow')
     assert.equal(prompt.includes('NO native callable tools'), false)
     assert.equal(p.response_policy.tools.mode, 'auto')
   }
