@@ -4,11 +4,11 @@
 
 本仓库为私有项目，下载和克隆需要有访问权限的 GitHub 账号。
 
-当前版本：**v1.5.0** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.5.1** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 ## 项目用途
 
-- 自动加载本地 `AGENTS.md`、`SOUL.md`，支持无匹配 skill 时直接调用现有工具；详见 [规则与工具](MAINTENANCE.md#规则加载与工具能力v150)。
+- 自动加载本地 `AGENTS.md`、`SOUL.md`，支持无匹配 skill 时直接调用现有工具；详见 [规则与工具](MAINTENANCE.md#规则加载与工具能力v151)。
 - 将 DeepSeek 网页对话接入 DSH，支持原生工具审批、执行结果和会话历史。
 - 转发 DSH 图片附件到官网，支持看图问答、后续工具步骤和带图历史压缩；详见 [图片功能](IMAGES.md)。
 - 提供工具协议解析、原始参数规则校验及交付前按错误类型自动格式纠正。
@@ -28,7 +28,7 @@ v1.4.0 将响应内容与请求归属分离：模型只输出回答或工具调�
 
 v1.4.1 补齐异常退出后的账号生成占用：官网原请求未确认结束时暂停新的生成；同时统一完整规则校验、已观测的官网字符上限及损坏记录处理。
 
-v1.5.0 在宿主准入阶段加载本地规则，并在规则更新或上下文压缩后补齐；每步声明真实工具能力，skill 不再被描述为执行工具的前提。遇到实际障碍后才检索外部方案。
+v1.5.1 按文件复用宿主已加载的完整规则，并在更新或上下文压缩后补齐；每步声明真实工具能力，无匹配 skill 仍能执行。按信息需求或实际障碍检索外部方案，GitHub 优先查文档、代码与 issue，需要复用工作流时再找 skill。
 
 ## 注意事项
 
@@ -63,7 +63,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.5.0.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.5.1.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。

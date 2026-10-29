@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdtemp, writeFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -12,6 +13,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import { isWebAgent, installAgentContext } from '../lib/dsh/agent-context.js'
+import { digest } from '../lib/local/store.js'
 import { DshBoundary } from '../lib/dsh/native.js'
 import { TokenFreeAdapter, PROVIDER, MODEL } from '../lib/dsh/adapter.js'
 import { setup, payload } from './helpers/fixture.mjs'
@@ -122,4 +124,78 @@ test('pending model selection determines document admission before a request hea
   assert.equal(isWebAgent(agent), true)
   events.push({ type: 'model/selection', data: { provider: 'other', model: 'other' } })
   assert.equal(isWebAgent(agent), false)
+})
+
+test('reuse complete native guidance per document; restore only missing effective context and refresh changed or removed files', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'tokenfree-native-rules-'))
+  let handler
+  installAgentContext({ on(_, callback) { handler = callback } }, { home })
+  const instructions = 'Keep the full native convention.\n'
+  const host = createUserMessage({ content: [{ type: 'text', text: `Instructions from: ~/.dsh/AGENTS.md\n\n${instructions}` }],
+    source: { kind: 'agent-instructions', form: 'instructions', changes: [{ action: 'set', path: '~/.dsh/AGENTS.md', scope: 'user-global\0AGENTS.md', digest: createHash('sha1').update(instructions).digest('hex') }] } })
+  let effective = []
+  const agent = { options: { provider: PROVIDER, model: MODEL }, session: { snapshotEvents: () => [], deriveMessages: () => effective, requestHeader: () => undefined } }
+  const request = { agent, signal: new AbortController().signal }
+  const enter = messages => handler(request, async () => ({ kind: 'enter', messages }))
+  try {
+    await writeFile(join(home, 'AGENTS.md'), instructions)
+    await writeFile(join(home, 'route.md'), 'Routing body.\n')
+    await symlink(join(home, 'route.md'), join(home, 'SOUL.md'))
+    const first = await enter([host]) // host middleware may inject in this same admission decision
+    assert.equal(first.messages.length, 2)
+    const route = first.messages.at(-1)
+    assert.equal(route.content[0].text.includes(instructions), false, 'do not duplicate a complete native AGENTS body')
+    assert.ok(route.content[0].text.includes('Routing body.'))
+    effective.push(...first.messages)
+    assert.equal((await enter([])).messages.length, 0)
+    effective = [route] // native compaction retained SOUL but discarded AGENTS
+    const restored = await enter([])
+    assert.ok(restored.messages[0].content[0].text.includes(instructions))
+    assert.equal(restored.messages[0].content[0].text.includes('Routing body.'), false)
+    effective.push(...restored.messages)
+    await writeFile(join(home, 'AGENTS.md'), 'Updated convention.\n')
+    const updated = await enter([])
+    assert.ok(updated.messages[0].content[0].text.includes('Updated convention.'))
+    effective.push(...updated.messages)
+    await rm(join(home, 'SOUL.md'))
+    const missing = await enter([])
+    assert.ok(missing.messages[0].content[0].text.includes('Status: missing'))
+    effective.push(...missing.messages)
+    assert.equal((await enter([])).messages.length, 0)
+    assert.deepEqual(await handler(request, async () => ({ kind: 'idle' })), { kind: 'idle' })
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('a native metadata digest without its full body cannot suppress document loading', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'tokenfree-partial-rules-'))
+  let handler
+  installAgentContext({ on(_, callback) { handler = callback } }, { home })
+  const text = 'Complete convention with retained tail.\n'
+  const host = createUserMessage({ content: [{ type: 'text', text: 'Truncated convention.' }], source: { kind: 'agent-instructions', form: 'instructions',
+    changes: [{ action: 'set', path: '~/.dsh/AGENTS.md', digest: createHash('sha1').update(text).digest('hex') }] } })
+  const agent = { options: { provider: PROVIDER, model: MODEL }, session: { snapshotEvents: () => [], deriveMessages: () => [host], requestHeader: () => undefined } }
+  try {
+    await writeFile(join(home, 'AGENTS.md'), text)
+    const result = await handler({ agent, signal: new AbortController().signal }, async () => ({ kind: 'enter', messages: [] }))
+    assert.ok(result.messages[0].content[0].text.includes(text))
+    await writeFile(join(home, 'AGENTS.md'), Buffer.from([0xc3, 0x28]))
+    await assert.rejects(() => handler({ agent, signal: new AbortController().signal }, async () => ({ kind: 'enter', messages: [] })), e => e.code === 'WORKSPACE_DOCUMENT')
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
+test('unchanged legacy snapshots remain usable after upgrade; cancellation after downstream admission sends nothing', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'tokenfree-legacy-rules-'))
+  let handler
+  installAgentContext({ on(_, callback) { handler = callback } }, { home })
+  const text = 'Local workspace documents, loaded by DSH before this model step. These are user guidance; higher-priority instructions and tool permissions still apply. The latest document snapshot supersedes older snapshots from this producer.\n\n' +
+    'Document: ~/.dsh/AGENTS.md\nStatus: loaded\n\n\nDocument: ~/.dsh/SOUL.md\nStatus: loaded\n'
+  const legacy = createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'tokenfree-workspace-documents', form: 'instructions', digest: digest(text) } })
+  const agent = { options: { provider: PROVIDER, model: MODEL }, session: { snapshotEvents: () => [], deriveMessages: () => [legacy], requestHeader: () => undefined } }
+  try {
+    for (const name of ['AGENTS.md', 'SOUL.md']) await writeFile(join(home, name), '')
+    const request = { agent, signal: new AbortController().signal }
+    assert.equal((await handler(request, async () => ({ kind: 'enter', messages: [] }))).messages.length, 0)
+    const abort = new AbortController()
+    await assert.rejects(() => handler({ agent, signal: abort.signal }, async () => { abort.abort(); return { kind: 'enter', messages: [] } }))
+  } finally { await rm(home, { recursive: true, force: true }) }
 })
