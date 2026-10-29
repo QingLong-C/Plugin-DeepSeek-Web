@@ -14,6 +14,7 @@ import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import BasicCompaction from '@deepseek-ai/dsh-compaction-basic'
 import Loader, { Group } from '@deepseek-ai/cordis-plugin-loader'
 import Presets from '@deepseek-ai/dsh-agent-preset-registry'
+import { installAgentContext } from '../lib/dsh/agent-context.js'
 import { DshBoundary } from '../lib/dsh/native.js'
 import { TokenFreeAdapter, PROVIDER, MODEL } from '../lib/dsh/adapter.js'
 import { TokenFreeGateway } from '../lib/dsh/gateway.js'
@@ -48,7 +49,7 @@ test('compaction respects pending native thinking selection before the next head
   assert.equal(compactionThinking(agent), true)
 })
 
-async function harness({ auto = true, count = 500, shrinkFailure = false, preset = false, basic = {} } = {}) {
+async function harness({ auto = true, count = 500, shrinkFailure = false, preset = false, documents = false, basic = {} } = {}) {
   const f = await setup(), ctx = new Context()
   let adapter
   f.web.modelType = 'default'
@@ -72,7 +73,14 @@ async function harness({ auto = true, count = 500, shrinkFailure = false, preset
       isolate: { compaction: true }, config: [{ id: 'compaction-basic', name: '@deepseek-ai/dsh-compaction-basic', config: { ...basic, auto } }] }] })
   } else await ctx.plugin(BasicCompaction, { ...basic, auto })
   let compaction
-  const main = await ctx.plugin(scope => { compaction = installCompaction(scope) })
+  if (documents) {
+    await writeFile(join(f.home, 'AGENTS.md'), 'Retain WORKSPACE_RULE after compaction.\n')
+    await writeFile(join(f.home, 'SOUL.md'), '| unrelated | unrelated-skill |\n')
+  }
+  const main = await ctx.plugin(scope => {
+    if (documents) installAgentContext(scope, { home: f.home })
+    compaction = installCompaction(scope)
+  })
   await ctx.plugin(AgentLoop, { agents: [] })
   const create = async id => preset ? (await ctx.agents.create({ sessionId: SessionId(id), agentOptions: { provider: PROVIDER, model: MODEL },
     setup: async scope => { await ctx.agentPresets.mount(scope, 'standard') } })).agent
@@ -447,4 +455,22 @@ test('native summary rate rejection waits and retries only the original summary 
   assert.equal(f.agent.session.snapshotEvents().filter(e=>e.type==='compaction/summary').length,1)
   assert.equal(f.web.stops.length,0)
  }finally{await f.close()}
+})
+
+
+test('automatic native compaction restores full local documents before the new Web bootstrap', { timeout: 20000 }, async () => {
+  const f = await harness({ documents: true })
+  try {
+    await f.ask('Remember OLD_FACT. ' + 'original context '.repeat(180))
+    await f.ask('Continue the work after compaction.')
+    assert.equal(f.web.edits.length, 1)
+    assert.equal(f.web.generations.length, 2)
+    const next = payload(f.web.generations[1].prompt)
+    assert.equal(next.mode, 'bootstrap')
+    const restored = next.messages.filter(m => m.context && m.content.some(b => b.text?.includes('Document: ~/.dsh/AGENTS.md')))
+    assert.equal(restored.length, 1)
+    assert.ok(JSON.stringify(restored).includes('Retain WORKSPACE_RULE after compaction.'))
+    assert.ok(JSON.stringify(restored).includes('| unrelated | unrelated-skill |'))
+    assert.equal(f.agent.session.snapshotEvents().filter(e => e.type === 'tool/call').length, 0)
+  } finally { await f.close() }
 })

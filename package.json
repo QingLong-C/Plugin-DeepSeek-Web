@@ -1,6 +1,6 @@
 {
   "name": "dsh-tokenfree",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QingLong-C/Plugin-DeepSeek-Web.git"
@@ -95,7 +95,8 @@
     "src/dsh/schema-sanitize.ts",
     "src/dsh/compaction.ts",
     "src/dsh/index.ts",
-    "src/dsh/strict-schema.ts"
+    "src/dsh/strict-schema.ts",
+    "src/dsh/agent-context.ts"
   ],
   "engines": {
     "node": "^22.19.0 || >=24",

@@ -4,6 +4,26 @@ import { encodeInput, catalogueHash } from '../lib/core/codec.js'
 import { StrictSchemas } from '../lib/dsh/strict-schema.js'
 import { input, tool, payload } from './helpers/fixture.mjs'
 
+test('every step advertises actual host tools independently of skills and preserves explicit no-tools policy', () => {
+  for (const bootstrap of [true, false]) {
+    const i = input([], 'without-a-skill', [tool])
+    const prompt = encodeInput(i, 'task', bootstrap ? 0 : 1, [tool], bootstrap, 100_000, bootstrap)
+    const p = payload(prompt)
+    assert.deepEqual(p.agent_capabilities.tool_names, [tool.name])
+    assert.equal(p.agent_capabilities.execution, 'dsh-host')
+    assert.equal(p.agent_capabilities.skill_required, false)
+    assert.ok(prompt.includes('A matching skill is not required'))
+    assert.ok(prompt.includes('discover applicable skills'))
+    assert.equal(prompt.includes('NO native callable tools'), false)
+    assert.equal(p.response_policy.tools.mode, 'auto')
+  }
+  const none = input([], 'no-tools', [])
+  none.policy = { tools: { mode: 'none' }, output: { type: 'text' } }
+  const p = payload(encodeInput(none, 'task', 0, [], true, 100_000))
+  assert.deepEqual(p.agent_capabilities.tool_names, [])
+  assert.equal(p.response_policy.tools.mode, 'none')
+})
+
 test('each bootstrap and delta carries a content-only envelope contract bound to current tools', () => {
   const schemas = new StrictSchemas()
   for (const mode of ['auto', 'none', 'required', 'named']) {

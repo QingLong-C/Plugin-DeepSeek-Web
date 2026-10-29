@@ -13,6 +13,7 @@ import { installCompaction } from './compaction.js'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TokenFreeError } from '../core/errors.js'
 import { ToolPolicyBridge } from './tool-policy.js'
+import { installAgentContext } from './agent-context.js'
 
 export { TokenFreeAdapter, PROVIDER, MODEL } from './adapter.js'
 export type { Config } from './adapter.js'
@@ -28,6 +29,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   let compaction: ReturnType<typeof installCompaction>
   const tools = new ToolPolicyBridge(ctx, (sessionId, operationId) => adapter!.toolCatalogueForCall(sessionId, operationId))
   const native = new DshBoundary(ctx, attempt => adapter?.reconcile(attempt))
+  installAgentContext(ctx)
   adapter = new TokenFreeAdapter(config, {
     readImage: async (ref, signal) => {
       const attachments = ctx.get('attachments')
