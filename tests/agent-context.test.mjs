@@ -18,7 +18,7 @@ import { DshBoundary } from '../lib/dsh/native.js'
 import { TokenFreeAdapter, PROVIDER, MODEL } from '../lib/dsh/adapter.js'
 import { setup, payload } from './helpers/fixture.mjs'
 
-test('skill demand reads routing before dispatch, admits it once and restores it after compaction', async () => {
+test('native execution demand reads routing before dispatch, admits it once and restores it after compaction', async () => {
   const home = await mkdtemp(join(tmpdir(), 'tokenfree-demand-')), handlers = new Map()
   installAgentContext({ on(name, callback) { handlers.set(name, callback) } }, { home })
   let effective = [], dispatched = 0
@@ -31,12 +31,11 @@ test('skill demand reads routing before dispatch, admits it once and restores it
     await writeFile(join(home, 'SOUL.md'), Buffer.from([0xc3, 0x28]))
     effective.push(...(await enter()).messages)
     assert.equal(effective.length, 1, 'greeting must not read invalid SOUL')
-    await invoke('inspect_fixture')
-    assert.equal((await enter()).messages.length, 0, 'ordinary tools need no skill or routing')
-    await assert.rejects(() => invoke('skill'), e => e.code === 'WORKSPACE_DOCUMENT')
-    assert.equal(dispatched, 1, 'unreadable demanded routing must fail before skill dispatch')
+    await assert.rejects(() => invoke('inspect_fixture'), e => e.code === 'WORKSPACE_DOCUMENT')
+    assert.equal(dispatched, 0, 'unreadable demanded routing must fail before tool dispatch')
     await writeFile(join(home, 'SOUL.md'), '| task | skill |\n| inspect | fixture |')
-    await invoke('skill')
+    await Promise.all([invoke('inspect_fixture'), invoke('inspect_fixture')])
+    assert.equal(dispatched, 2, 'parallel native calls remain unchanged and share routing demand')
     const routed = await enter()
     assert.deepEqual(routed.messages[0].source.documents.map(x => x.name), ['SOUL.md'])
     effective.push(...routed.messages)
@@ -153,6 +152,8 @@ test('native tools execute and return real results with no skill tool or matchin
     assert.equal(second.mode, 'delta')
     assert.deepEqual(second.agent_capabilities.tool_names, ['inspect_fixture'])
     assert.equal(second.agent_capabilities.skill_required, false)
+    assert.equal(f.web.generations[0].prompt.includes('| unrelated task | unrelated-skill |'), false)
+    assert.equal(f.web.generations[1].prompt.includes('| unrelated task | unrelated-skill |'), true, 'direct tools must also demand routing without requiring a matching skill')
   } finally { await adapter?.dispose(); await ctx.fiber.dispose(); await f.close() }
 })
 

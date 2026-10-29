@@ -32,6 +32,7 @@ export function isWebAgent(agent: Agent): boolean {
 export function installAgentContext(ctx: Context, options: { home?: string } = {}): void {
   const caches = new WeakMap<Agent, Map<string, { fingerprint: string; text: string }>>()
   const routingDemand = new WeakSet<Agent>()
+  const routingLoads = new WeakMap<Agent, Promise<unknown>>()
   const load = async (agent: Agent, signal: AbortSignal, names: string[]) => {
     signal.throwIfAborted()
     let cache = caches.get(agent)
@@ -78,13 +79,19 @@ export function installAgentContext(ctx: Context, options: { home?: string } = {
     }
     return documents
   }
-  // The native skill call is an explicit document demand, not a guess about
-  // user intent. Read routing before dispatch, then admit the real snapshot at
-  // the next native model boundary. Never change calls or fabricate results.
+  // Native tool use is an explicit execution demand, not a guess about user
+  // wording. Read routing before dispatch, then admit its real snapshot at the
+  // next model boundary. This also covers callers that skip the skill tool.
   ctx.on('tools/pre-execute', async (exec, next) => {
-    if (exec.name === 'skill' && exec.agent && isWebAgent(exec.agent)) {
-      await load(exec.agent, exec.signal, ['SOUL.md'])
-      routingDemand.add(exec.agent)
+    if (exec.agent && isWebAgent(exec.agent) && !routingDemand.has(exec.agent)) {
+      const agent = exec.agent
+      let pending = routingLoads.get(agent)
+      if (!pending) {
+        pending = load(agent, exec.signal, ['SOUL.md']).then(() => { routingDemand.add(agent) })
+        routingLoads.set(agent, pending)
+      }
+      try { await pending } finally { if (routingLoads.get(agent) === pending) routingLoads.delete(agent) }
+      exec.signal.throwIfAborted()
     }
     return next()
   })
