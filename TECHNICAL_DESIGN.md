@@ -1,6 +1,6 @@
 # DeepSeek Web 技术方案
 
-v1.5.2 在原生 agent/pre-step 准入后只补齐 AGENTS.md；SOUL.md 和 skill 由用户规则与任务决定，不自动预读。工具能力仍每步声明，序列化协议不附加业务流程；加载边界见 [维护指南](MAINTENANCE.md#规则加载与工具能力v152)。
+v1.5.3 开局在原生 agent/pre-step 准入后只补齐 AGENTS.md；原生 skill 调用在 tools/pre-execute 触发 SOUL.md 按需读取，下一步准入补齐正文，不预读 skill 本体。工具能力仍每步声明，序列化协议不附加业务流程；加载边界见 [维护指南](MAINTENANCE.md#规则加载与工具能力v153)。
 
 > 维护版 v1.3.1 已实现原生图片附件转发；当前行为与恢复边界见 [图片功能](IMAGES.md)。以下继承设计与历史状态不替代当前实现及验收。
 

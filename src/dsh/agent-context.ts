@@ -31,15 +31,13 @@ export function isWebAgent(agent: Agent): boolean {
 /** Load local user guidance at the native admission boundary, never as fabricated tool results. */
 export function installAgentContext(ctx: Context, options: { home?: string } = {}): void {
   const caches = new WeakMap<Agent, Map<string, { fingerprint: string; text: string }>>()
-  ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
-    if (!isWebAgent(agent)) return next()
+  const routingDemand = new WeakSet<Agent>()
+  const load = async (agent: Agent, signal: AbortSignal, names: string[]) => {
     signal.throwIfAborted()
     let cache = caches.get(agent)
     if (!cache) { cache = new Map(); caches.set(agent, cache) }
     const documents: { name: string; text: string; digest: string; nativeDigest?: string; body?: string }[] = []
-    // AGENTS owns task routing and any further document reads. The bridge must
-    // not anticipate that workflow by preloading SOUL or skill bodies.
-    for (const name of ['AGENTS.md']) {
+    for (const name of names) {
       const path = options.home ? join(options.home, name) : dshHomePath(name)
       try {
         const info = await stat(path, { bigint: true })
@@ -72,12 +70,27 @@ export function installAgentContext(ctx: Context, options: { home?: string } = {
         documents.push({ name, text, digest: digest(text), body: saved.text, nativeDigest: createHash('sha1').update(saved.text).digest('hex') })
       } catch (error) {
         signal.throwIfAborted()
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new TokenFreeError(`Cannot load workspace document ${name}; expected a readable UTF-8 regular file up to ${maxBytes} bytes. No model request was sent.`, 'WORKSPACE_DOCUMENT')
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new TokenFreeError(`Cannot load workspace document ${name}; expected a readable UTF-8 regular file up to ${maxBytes} bytes. The dependent operation was not continued.`, 'WORKSPACE_DOCUMENT')
         cache.delete(name)
         const text = `Document: ~/.dsh/${name}\nStatus: missing (no document guidance is available from this file).`
         documents.push({ name, text, digest: digest(text) })
       }
     }
+    return documents
+  }
+  // The native skill call is an explicit document demand, not a guess about
+  // user intent. Read routing before dispatch, then admit the real snapshot at
+  // the next native model boundary. Never change calls or fabricate results.
+  ctx.on('tools/pre-execute', async (exec, next) => {
+    if (exec.name === 'skill' && exec.agent && isWebAgent(exec.agent)) {
+      await load(exec.agent, exec.signal, ['SOUL.md'])
+      routingDemand.add(exec.agent)
+    }
+    return next()
+  })
+  ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+    if (!isWebAgent(agent)) return next()
+    const documents = await load(agent, signal, routingDemand.has(agent) ? ['AGENTS.md', 'SOUL.md'] : ['AGENTS.md'])
     signal.throwIfAborted()
     const decision = await next()
     signal.throwIfAborted()

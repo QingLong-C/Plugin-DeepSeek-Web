@@ -4,11 +4,11 @@
 
 本仓库为私有项目，下载和克隆需要有访问权限的 GitHub 账号。
 
-当前版本：**v1.5.2** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.5.3** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 ## 项目用途
 
-- 开局只补齐本地 `AGENTS.md`，SOUL.md 与 skill 按规则和具体任务读取；支持直接使用现有工具；详见 [规则与工具](MAINTENANCE.md#规则加载与工具能力v152)。
+- 开局只补齐本地 `AGENTS.md`，SOUL.md 与 skill 按规则和具体任务读取；支持直接使用现有工具；详见 [规则与工具](MAINTENANCE.md#规则加载与工具能力v153)。
 - 将 DeepSeek 网页对话接入 DSH，支持原生工具审批、执行结果和会话历史。
 - 转发 DSH 图片附件到官网，支持看图问答、后续工具步骤和带图历史压缩；详见 [图片功能](IMAGES.md)。
 - 提供工具协议解析、原始参数规则校验及交付前按错误类型自动格式纠正。
@@ -28,7 +28,7 @@ v1.4.0 将响应内容与请求归属分离：模型只输出回答或工具调�
 
 v1.4.1 补齐异常退出后的账号生成占用：官网原请求未确认结束时暂停新的生成；同时统一完整规则校验、已观测的官网字符上限及损坏记录处理。
 
-v1.5.2 只自动补齐 AGENTS.md，保留全文复用、更新和压缩恢复；SOUL.md 由任务按需读取。工具协议只处理声明、序列化、校验与真实结果，不另加技能发现或外部检索的业务流水线。
+v1.5.3 开局只补齐 AGENTS.md；实际调用原生 skill 时按需读取 SOUL.md，并在下一次模型请求前提供路由正文，保留全文复用、更新和压缩恢复。工具协议只处理声明、序列化、校验与真实结果，不另加技能发现或外部检索的业务流水线。
 
 ## 注意事项
 
@@ -63,7 +63,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.5.2.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.5.3.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。

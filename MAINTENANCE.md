@@ -1,8 +1,8 @@
 # 安装与维护
 
-## 规则加载与工具能力（v1.5.2）
+## 规则加载与工具能力（v1.5.3）
 
-DeepSeek Web 路由每次模型准入只检查 DSH home 下的 `AGENTS.md`，作为真实原生用户指引消息进入模型上下文；不执行模板插值、不伪造文件工具调用，也不把本地文件提升为系统指令。宿主已完整注入当前版本时直接复用，只补缺失或改变的正文，压缩丢失后再次补齐。SOUL.md、skill 与 reference 是否读取由 AGENTS.md 和具体任务决定，插件不预读、不检查其状态、不自动恢复这些文件。兼容已有快照，不清空历史；其他 provider 不运行此加载器，项目级规则继续由宿主管理。
+DeepSeek Web 路由每次模型准入只检查 DSH home 下的 `AGENTS.md`，作为真实原生用户指引消息进入模型上下文；不执行模板插值、不伪造文件工具调用，也不把本地文件提升为系统指令。宿主已完整注入当前版本时直接复用，只补缺失或改变的正文，压缩丢失后再次补齐。SOUL.md 不在开局预读：实际调用原生 `skill` 工具时，加载器先读取 SOUL.md，再由原生准入阶段在下一次模型请求中补齐其真实正文，后续去重、更新和压缩恢复。首次 skill 名称仍由模型选择，这个机制不代替选路或证明模型理解了路由；skill 与 reference 正文仍由原生工具按需读取。普通工具不要求 skill 或 SOUL.md。兼容已有快照，不清空历史；其他 provider 不运行此加载器，项目级规则继续由宿主管理。
 
 每文件限 64 KiB、必须为可读 UTF-8 常规文件；允许指向常规文件的软链。缺失会明确写入上下文，其他读取失败在普通生成前报 WORKSPACE_DOCUMENT，避免静默遗漏。加载器缓存内容，每步检查文件状态，重新读取时检查打开后的文件及读前读后版本，防止读到中途变化的内容；超大规则应拆入按需加载的 skill，不能截断后称已完整读取。宿主已有完整注入也算已加载，不需要模型为证明读过再调用一次工具。
 
@@ -63,10 +63,10 @@ shasum -a 256 -c SHA256SUMS
 DSH 的插件安装目标是 profile。CLI 可用且目标 profile 没有被桌面占用时，使用其原生安装命令，文件名替换成实际下载路径：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.5.2.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.5.3.tgz
 ```
 
-若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-1.5.2.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
+若客户端拒绝本地路径或 desktop 被独占，停止后按该 DSH 版本的本地包安装方式处理；不要改用 npm 上游同名版本冒充本版。维护者可把 tgz 固定进 profile 的 vendor，使用应用自带 pnpm 安装 `file:./vendor/dsh-tokenfree-1.5.3.tgz`，并核对 `package.json` 的 `dsh.profile.bundles` 含 `dsh-tokenfree`。已有 pnpm store 或依赖冲突应单独修正，不全量重建 profile。
 
 重启后核对实际安装版本、DeepSeek Web 设置卡片、登录状态及唯一活动插件，再测试普通对话和真实工具往返。安装命令成功不等于业务验收通过。此前完整 `qinglong.3` 安装包已在 macOS DSH 0.2.1-rc.3 验证原长对话真实工具往返、双向模型选择和设置卡片；新环境及新修订版的安装仍需分别验收。
 

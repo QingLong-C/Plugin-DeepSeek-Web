@@ -18,6 +18,38 @@ import { DshBoundary } from '../lib/dsh/native.js'
 import { TokenFreeAdapter, PROVIDER, MODEL } from '../lib/dsh/adapter.js'
 import { setup, payload } from './helpers/fixture.mjs'
 
+test('skill demand reads routing before dispatch, admits it once and restores it after compaction', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'tokenfree-demand-')), handlers = new Map()
+  installAgentContext({ on(name, callback) { handlers.set(name, callback) } }, { home })
+  let effective = [], dispatched = 0
+  const agent = { options: { provider: PROVIDER, model: MODEL }, session: { snapshotEvents: () => [], deriveMessages: () => effective, requestHeader: () => undefined } }
+  const signal = new AbortController().signal
+  const enter = () => handlers.get('agent/pre-step')({ agent, signal }, async () => ({ kind: 'enter', messages: [] }))
+  const invoke = name => handlers.get('tools/pre-execute')({ agent, signal, name }, async () => { dispatched++; return { kind: 'allow' } })
+  try {
+    await writeFile(join(home, 'AGENTS.md'), 'Read routing on skill demand.')
+    await writeFile(join(home, 'SOUL.md'), Buffer.from([0xc3, 0x28]))
+    effective.push(...(await enter()).messages)
+    assert.equal(effective.length, 1, 'greeting must not read invalid SOUL')
+    await invoke('inspect_fixture')
+    assert.equal((await enter()).messages.length, 0, 'ordinary tools need no skill or routing')
+    await assert.rejects(() => invoke('skill'), e => e.code === 'WORKSPACE_DOCUMENT')
+    assert.equal(dispatched, 1, 'unreadable demanded routing must fail before skill dispatch')
+    await writeFile(join(home, 'SOUL.md'), '| task | skill |\n| inspect | fixture |')
+    await invoke('skill')
+    const routed = await enter()
+    assert.deepEqual(routed.messages[0].source.documents.map(x => x.name), ['SOUL.md'])
+    effective.push(...routed.messages)
+    await invoke('skill')
+    assert.equal((await enter()).messages.length, 0, 'do not repeat full routing in a valid context')
+    effective = []
+    assert.deepEqual((await enter()).messages[0].source.documents.map(x => x.name), ['AGENTS.md', 'SOUL.md'])
+    agent.options.provider = 'other'
+    await writeFile(join(home, 'SOUL.md'), Buffer.from([0xc3, 0x28]))
+    await invoke('skill')
+  } finally { await rm(home, { recursive: true, force: true }) }
+})
+
 test('native sessions preload only AGENTS; SOUL is task-owned and changes do not trigger injection', async () => {
   const f = await setup(), ctx = new Context()
   const home = await mkdtemp(join(tmpdir(), 'tokenfree-rules-'))
@@ -121,6 +153,39 @@ test('native tools execute and return real results with no skill tool or matchin
     assert.equal(second.mode, 'delta')
     assert.deepEqual(second.agent_capabilities.tool_names, ['inspect_fixture'])
     assert.equal(second.agent_capabilities.skill_required, false)
+  } finally { await adapter?.dispose(); await ctx.fiber.dispose(); await f.close() }
+})
+
+test('native skill dispatch admits demanded routing alongside the unchanged real skill result', async () => {
+  const f = await setup(), ctx = new Context()
+  let adapter, runs = 0
+  try {
+    await writeFile(join(f.home, 'AGENTS.md'), 'Use routing when selecting a skill.')
+    await writeFile(join(f.home, 'SOUL.md'), '| fixture task | fixture skill |')
+    for (const plugin of [SessionStore, AgentRegistry, LlmRuntime, SessionProjectionRegistry, ToolRuntime, SystemPrompt]) await ctx.plugin(plugin)
+    ctx.on('session/flush', async () => {})
+    const native = new DshBoundary(ctx, attempt => adapter?.reconcile(attempt))
+    installAgentContext(ctx, { home: f.home })
+    ctx.tools.register(defineTool({ name: 'skill', description: 'Read the requested skill.', parameters: {},
+      output: { schema: { type: 'string' }, render: (_, value) => [{ type: 'text', text: value }] },
+      execute: async () => { runs++; return 'real-skill-body' } }))
+    adapter = new TokenFreeAdapter({ sessionStoreId: 'routing-demand-native' }, { store: f.store, native,
+      credential: async () => ({ token: 'fixture', accountId: 'fixture-owner' }), client: (_, c) => f.web.client(c.diagnostics, c.operationId) })
+    ctx.llm.registerAdapter([PROVIDER], adapter)
+    f.web.answer = p => p.messages.some(m => m.role === 'tool') ? { kind: 'final', text: 'done' }
+      : { kind: 'tool', calls: [{ name: 'skill', arguments: {} }] }
+    await ctx.plugin(AgentLoop, { agents: [] })
+    const agent = await ctx.agentLoop.create(SessionId('routing-demand-native'), { provider: PROVIDER, model: MODEL })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Use the fixture skill.' }], source: { kind: 'user' } }))
+    await agent.whenIdle(); await adapter.reconcile()
+    assert.equal(runs, 1)
+    assert.equal(f.web.generations[0].prompt.includes('| fixture task | fixture skill |'), false)
+    assert.equal(f.web.generations[1].prompt.includes('| fixture task | fixture skill |'), true)
+    assert.equal(f.web.generations[1].prompt.includes('real-skill-body'), true)
+    const events = agent.session.snapshotEvents()
+    assert.equal(events.filter(e => e.type === 'tool/call').length, 1)
+    assert.equal(events.filter(e => e.type === 'tool/result').length, 1)
+    assert.equal(events.findLast(e => e.type === 'turn/end').data.reason.kind, 'completed')
   } finally { await adapter?.dispose(); await ctx.fiber.dispose(); await f.close() }
 })
 
