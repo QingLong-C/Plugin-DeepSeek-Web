@@ -2,9 +2,9 @@
 
 让 DSH 使用你自己的 DeepSeek 网页账号完成对话、工具任务和长对话处理，无需配置 API Key。模型在 DeepSeek 服务器运行，工具由 DSH 在本机按原有权限执行。
 
-本仓库为私有项目，下载和克隆需要有访问权限的 GitHub 账号。
+安装包和源码通过本仓库公开提供。
 
-当前版本：**v1.5.3** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.5.4** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 ## 项目用途
 
@@ -30,11 +30,13 @@ v1.4.1 补齐异常退出后的账号生成占用：官网原请求未确认结�
 
 v1.5.3 开局只补齐 AGENTS.md；实际调用原生工具 时按需读取 SOUL.md，并在下一次模型请求前提供路由正文，保留全文复用、更新和压缩恢复。工具协议只处理声明、序列化、校验与真实结果，不另加技能发现或外部检索的业务流水线。
 
+v1.5.4 修复 DSH 小版本更新后插件被精确版本限制停用的问题；SDK 已对齐 rc.5，同系列补丁更新继续保留原有安装和配置。
+
 ## 注意事项
 
 | 项目 | 说明 |
 | --- | --- |
-| 兼容基线 | macOS、DSH 0.2.1-rc.3、Google Chrome；其他宿主版本需重新验证 |
+| 兼容基线 | macOS、DSH >=0.2.1-rc.3 且 <0.3.0-0、Google Chrome；当前 SDK 基线为 rc.5，跨系列需重新验证 |
 | 网页服务 | 使用网页协议，属于实验性接入；不是官方 API，也不保证同等稳定性或账号安全 |
 | 自动等待 | 默认 60 秒冷却，连续限流逐级退避，最高 15 分钟；有效 Retry-After 作为下限，最长记录 24 小时 |
 | 异常退出 | 原请求未核实结束时，同账号的新生成暂停；重启保留占用，核实不会重发原问题 |
@@ -63,7 +65,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.5.3.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.5.4.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。
