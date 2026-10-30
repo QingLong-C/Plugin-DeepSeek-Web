@@ -1,5 +1,10 @@
 # Personal maintained edition
 
+## 1.5.5 (2026-10-30)
+
+- 取消后续 DSH 版本号上限，客户端更新不再仅因版本号变化停用 DeepSeek Web。
+- SDK 与实测基线对齐 rc.5，保留原有账号、会话和设置。
+
 ## 1.5.4 (2026-10-30)
 
 - 修复 DSH 从 rc.3 更新到 rc.5 后 DeepSeek Web 被精确宿主版本限制停用的问题。
