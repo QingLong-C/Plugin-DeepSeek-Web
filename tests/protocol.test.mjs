@@ -172,3 +172,36 @@ test('metadata authentication classification retains business errors and rejects
     await assert.rejects(client.check(AbortSignal.timeout(1000)), error => error.code === expected)
   }
 })
+
+test('generation JSON refusals retain safe error classes without pretending to be an SSE stream', async () => {
+  for (const mode of ['generate', 'editRoot']) for (const [response, code, rejected, numeric] of [
+    [() => Response.json({ code: 40003, msg: 'fixture-private-reflection' }), 'AUTH', true, { code: 40003 }],
+    [() => Response.json({ code: 0, data: { biz_code: 40003 } }), 'AUTH', true, { code: 0, bizCode: 40003 }],
+    [() => Response.json({ code: 0, data: { biz_code: 40301 } }), 'POW_FAILED', true, { code: 0, bizCode: 40301 }],
+    [() => Response.json({ code: 0, data: { biz_code: 40029 } }), 'WEB_CHALLENGE', false, { code: 0, bizCode: 40029 }],
+    [() => Response.json({ code: 0, data: { biz_code: 49999, biz_msg: 'fixture-private-reflection' } }), 'WEB_REJECTED', false, { code: 0, bizCode: 49999 }],
+    [() => Response.json({ code: 0, data: { biz_code: 0, biz_data: {} } }), 'WEB_PROTOCOL', false, { code: 0, bizCode: 0 }],
+    [() => new Response('<html>fixture-private-reflection</html>', { headers: { 'content-type': 'text/html' } }), 'WEB_PROTOCOL', false],
+    [() => new Response('{fixture-private-reflection', { headers: { 'content-type': 'application/json' } }), 'WEB_PROTOCOL', false],
+  ]) {
+    let completions = 0
+    const diagnostics = []
+    const client = new DeepSeekWebClient({ token: 'fixture-token' }, {
+      operationId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      diagnostics: { protect() {}, write() {}, content(_id, event, payload) { if (event === 'web.envelope') diagnostics.push(payload) } },
+      solve: async () => 'fixture-proof',
+      fetch: async url => {
+        if (url.endsWith('create_pow_challenge')) return envelope({ challenge: {
+          algorithm: 'DeepSeekHashV1', challenge: 'fixture', salt: 'fixture', signature: 'fixture', difficulty: 1, expire_at: Date.now() + 60000,
+        } })
+        assert.equal(new URL(url).pathname, mode === 'generate' ? '/api/v0/chat/completion' : '/api/v0/chat/edit_message')
+        completions++; return response()
+      },
+    })
+    const consume = async () => { for await (const event of client[mode]('fixture-chat', mode === 'generate' ? null : 1, 'hello', false, AbortSignal.timeout(1000))) assert.fail('No event may be delivered') }
+    await assert.rejects(consume(), error => error.code === code && Boolean(error.details?.accepted === false) === rejected && !error.message.includes('fixture-private'))
+    assert.equal(completions, 1)
+    if (numeric) assert.deepEqual(diagnostics.at(-1), numeric)
+    assert.equal(JSON.stringify(diagnostics).includes('fixture-private-reflection'), false)
+  }
+})

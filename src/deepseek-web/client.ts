@@ -99,16 +99,35 @@ export class DeepSeekWebClient implements WebTransport {
     try { value = JSON.parse(text) } catch { throw new LlmError('Unexpected Web response; inspect the official login/challenge.', 'WEB_PROTOCOL') }
     if (!record(value)) throw new LlmError('Invalid Web response envelope.', 'WEB_PROTOCOL')
     const code = Number(value.code)
+    const business = record(value.data) ? Number(value.data.biz_code) : NaN
+    if (this.dependencies.operationId) this.dependencies.diagnostics?.content(this.dependencies.operationId, 'web.envelope', {
+      ...(Number.isSafeInteger(code) ? { code } : {}),
+      ...(Number.isSafeInteger(business) ? { bizCode: business } : {}),
+    })
     // Authentication rejections can legitimately omit the success data envelope.
     // Preserve their classification so the existing login lifecycle can recover.
     if ([40003, 40001, 40002].includes(code)) throw new LlmError('DeepSeek Web rejected the operation.', 'AUTH')
     if (!record(value.data)) throw new LlmError('Invalid Web response envelope.', 'WEB_PROTOCOL')
-    const business = Number(value.data.biz_code)
     if (code !== 0 || (business !== 0 && business !== 22)) {
       const auth = [40003, 40001, 40002].includes(code) || [40003, 40001, 40002].includes(business)
       throw new LlmError('DeepSeek Web rejected the operation.', auth ? 'AUTH' : business === 40029 ? 'WEB_CHALLENGE' : [40300, 40301].includes(business) ? 'POW_FAILED' : 'WEB_REJECTED')
     }
     return { code: business, value: value.data.biz_data }
+  }
+  private async *generationEvents(response: Response, chatId: string, signal: AbortSignal): AsyncIterable<WebEvent> {
+    if (!response.headers.get('content-type')?.includes('text/event-stream')) {
+      try { await this.envelope(response) }
+      catch (error) {
+        // Only known pre-generation refusals prove non-acceptance. Unknown JSON,
+        // HTML and malformed responses must keep the persistent generation fence.
+        if (error instanceof LlmError && ['AUTH', 'POW_FAILED'].includes(error.code)) {
+          throw new LlmError(error.message, error.code, { ...error.details, accepted: false })
+        }
+        throw error
+      }
+      throw new LlmError('Expected a Web event stream.', 'WEB_PROTOCOL')
+    }
+    yield* readWebEvents(response, chatId, undefined, signal)
   }
   private async json(path: string, body: unknown | undefined, signal: AbortSignal): Promise<unknown> {
     const result = await this.envelope(await this.request(path, body, signal))
@@ -141,7 +160,7 @@ export class DeepSeekWebClient implements WebTransport {
     const body = { chat_session_id: chatId, parent_message_id: parentId, prompt, ref_file_ids: [...attachments], model_type: null,
       thinking_enabled: thinking, search_enabled: false, action: null, preempt: false }
     const response = await this.request('/api/v0/chat/completion', body, signal, { accept: 'text/event-stream', 'x-ds-pow-response': proof })
-    yield* readWebEvents(response, chatId, undefined, signal)
+    yield* this.generationEvents(response, chatId, signal)
   }
   async uploadImage(image: { ref: ImageRef; data: Uint8Array }, thinking: boolean, signal: AbortSignal): Promise<WebFile> {
     const ref = imageRef(image.ref)
@@ -238,7 +257,7 @@ export class DeepSeekWebClient implements WebTransport {
       throw new LlmError('Summary preparation failed before submission.', 'POW_FAILED', { accepted: false })
     }
     const body = { chat_session_id: chatId, message_id: rootId, ref_file_ids: [...attachments], prompt, thinking_enabled: thinking, search_enabled: false, action: null }
-    yield* readWebEvents(await this.request('/api/v0/chat/edit_message', body, signal, { accept: 'text/event-stream', 'x-ds-pow-response': proof }), chatId, undefined, signal)
+    yield* this.generationEvents(await this.request('/api/v0/chat/edit_message', body, signal, { accept: 'text/event-stream', 'x-ds-pow-response': proof }), chatId, signal)
   }
   async stop(identity: WebIdentity, signal: AbortSignal): Promise<void> {
     await this.json('/api/v0/chat/stop_stream', { chat_session_id: identity.chatId, message_id: identity.responseId }, signal)
