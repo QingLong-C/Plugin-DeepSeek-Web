@@ -1,6 +1,6 @@
 {
   "name": "dsh-tokenfree",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QingLong-C/Plugin-DeepSeek-Web.git"
@@ -122,7 +122,7 @@
     "build": "node scripts/clean.mjs && pnpm build:host && pnpm build:client",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit --emitDeclarationOnly false",
     "test": "pnpm build && pnpm test:unit",
-    "test:unit": "node --test --test-skip-pattern='^real Chrome ' tests/*.test.mjs",
+    "test:unit": "node --test --test-concurrency=4 --test-skip-pattern='^real Chrome ' tests/*.test.mjs",
     "check": "pnpm check:repo && pnpm build && pnpm typecheck && pnpm test:unit && pnpm check:package",
     "check:repo": "node scripts/check-repo.mjs",
     "check:package": "node scripts/check-package.mjs",

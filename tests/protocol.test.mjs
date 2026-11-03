@@ -138,3 +138,37 @@ test('authentication, rate limits, redirects, and raw upstream errors never trig
     assert.equal(calls, 1)
   }
 })
+
+test('official top-level authentication rejection survives an absent metadata data envelope', async () => {
+  for (const code of [40001, 40002, 40003]) {
+    for (const fields of [{ data: null }, {}, { data: 'not-an-envelope' }]) {
+      let requests = 0
+      const client = new DeepSeekWebClient({ token: 'fixture-private-token' }, {
+        fetch: async () => {
+          requests++
+          return Response.json({ code, msg: 'fixture-private-upstream-message', ...fields })
+        },
+      })
+      await assert.rejects(client.check(AbortSignal.timeout(1000)), error => {
+        assert.equal(error.code, 'AUTH')
+        assert.equal(error.message.includes('fixture-private'), false)
+        return true
+      })
+      assert.equal(requests, 1)
+    }
+  }
+})
+
+test('metadata authentication classification retains business errors and rejects malformed success', async () => {
+  for (const [body, expected] of [
+    [{ code: 0, data: { biz_code: 40003, biz_data: null } }, 'AUTH'],
+    [{ code: 0, data: null }, 'WEB_PROTOCOL'],
+    [{ code: 49999, data: null }, 'WEB_PROTOCOL'],
+    [null, 'WEB_PROTOCOL'],
+  ]) {
+    const client = new DeepSeekWebClient({ token: 'fixture-token' }, {
+      fetch: async () => Response.json(body),
+    })
+    await assert.rejects(client.check(AbortSignal.timeout(1000)), error => error.code === expected)
+  }
+})

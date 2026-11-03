@@ -66,6 +66,23 @@ test('normal login redirects can destroy the execution context without losing a 
   } finally { await browser.close(); await rm(directory, { recursive: true, force: true }) }
 })
 
+test('login closes its own pages without beforeunload and concurrent close waits for the same cleanup', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tokenfree-login-close-'))
+  const order = []; let finish, pending = false
+  const page = { isClosed: () => false, close: async options => { assert.equal(options.runBeforeUnload, false); order.push('page') } }
+  const browser = new ManagedBrowserLogin(join(directory, 'browser-profile'), { diagnostics: new LocalDiagnostics(directory, false) })
+  browser.context = { pages: () => [page], close: async () => { order.push('context'); await new Promise(resolve => { finish = resolve }) } }
+  try {
+    const first = browser.close()
+    while (!finish) await new Promise(resolve => setImmediate(resolve))
+    const second = browser.close().then(() => { pending = true })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(pending, false)
+    assert.deepEqual(order, ['page', 'context'])
+    finish(); await Promise.all([first, second]); assert.equal(pending, true)
+  } finally { finish?.(); await browser.close(); await rm(directory, { recursive: true, force: true }) }
+})
+
 test('managed login failures identify the phase without revealing raw browser or network data', async () => {
   for (const mode of ['launch', 'verify']) {
     const directory = await mkdtemp(join(tmpdir(), 'tokenfree-login-failure-'))

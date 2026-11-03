@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { record } from '../core/errors.js'
 import { digest, type ActiveOperation } from './store.js'
 
-/** Narrow migration of old rate-limit journals. Prose, previews and error labels are not evidence. */
-export async function loggedRateRejection(home: string, operation: ActiveOperation): Promise<boolean> {
+/** Narrow migration of explicit service refusals. Prose/previews/error labels are not evidence. */
+async function loggedRejection(home: string, operation: ActiveOperation, reason: 'rate_limit_reached' | 'backend_busy'): Promise<boolean> {
   if (!/^[a-f0-9-]{36}$/.test(operation.id) || !operation.native || !operation.identity || operation.repair || operation.expected?.length) return false
   let file
   try {
@@ -31,9 +31,12 @@ export async function loggedRateRejection(home: string, operation: ActiveOperati
       if (p.name === 'ready') {
         if (ready || !submitted || p.data.request_message_id !== operation.identity.requestId || p.data.response_message_id !== operation.identity.responseId) return false
         ready = true
-      } else if (p.name === 'hint' && p.data.type === 'error' && p.data.clear_response === true && p.data.finish_reason === 'rate_limit_reached' && ready && !rejected) rejected = true
+      } else if (p.name === 'hint' && p.data.type === 'error' && p.data.clear_response === true && p.data.finish_reason === reason && ready && !rejected) rejected = true
       else return false // any snapshot, patch, other control or subsequent stream remains uncertain
     }
     return native && submitted && ready && rejected
   } catch { return false } finally { await file?.close() }
 }
+
+export const loggedRateRejection = (home: string, operation: ActiveOperation) => loggedRejection(home, operation, 'rate_limit_reached')
+export const loggedBackendBusyRejection = (home: string, operation: ActiveOperation) => loggedRejection(home, operation, 'backend_busy')

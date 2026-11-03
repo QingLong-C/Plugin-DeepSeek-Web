@@ -51,6 +51,7 @@ interface BrowserDependencies {
 /** Owns a separate Chrome profile, controlled through a pipe, never the user's daily browser. */
 export class ManagedBrowserLogin implements BrowserLogin {
   private context?: BrowserContext
+  private closing?: Promise<void>
   private readonly log: LocalDiagnostics
   private operationId = ''
   private startedAt = 0
@@ -202,8 +203,19 @@ export class ManagedBrowserLogin implements BrowserLogin {
   }
 
   async close(): Promise<void> {
+    if (this.closing) return this.closing
     const context = this.context
     this.context = undefined
-    await context?.close().catch(() => {})
+    if (!context) return
+    this.closing = (async () => {
+      // These pages belong only to the dedicated login profile. Close them
+      // without beforeunload prompts before asking Chrome to exit; otherwise a
+      // verified login can remain stuck waiting for window shutdown.
+      await Promise.all(context.pages().filter(page => !page.isClosed()).map(async page => {
+        try { await page.close({ runBeforeUnload: false }) } catch {}
+      }))
+      await context.close().catch(() => {})
+    })().finally(() => { this.closing = undefined })
+    return this.closing
   }
 }

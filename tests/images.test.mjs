@@ -4,12 +4,66 @@ import { createHash } from 'node:crypto'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { TokenFreeAdapter, PROVIDER, MODEL } from '../lib/dsh/adapter.js'
-import { setup, collect, envelope, user } from './helpers/fixture.mjs'
+import { setup, collect, envelope, user, payload } from './helpers/fixture.mjs'
+import { projectMessage } from '../lib/core/codec.js'
 
 const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9sAAAAASUVORK5CYII=', 'base64')
 const ref = { attachmentId: 'sha256:' + createHash('sha256').update(bytes).digest('hex'), mediaType: 'image/png', bytes: bytes.length, width: 1, height: 1, name: 'one.png' }
 const picture = () => ({ id: 'image-question', role: 'user', content: [{ type: 'text', text: 'Describe this image.' }, { type: 'image', attachment: ref }] })
 const options = (messages = [picture()], sessionId) => ({ provider: PROVIDER, model: MODEL, messages, ...(sessionId ? { sessionId } : {}) })
+
+const toolPicture = () => ({ id: 'screenshot-result', role: 'tool', source: { callId: 'screen-call' }, isError: false,
+  content: [{ type: 'text', text: 'Screenshot saved locally.' }, { type: 'image', attachment: ref }] })
+
+test('tool screenshot history allows subsequent generation without reading or uploading its bytes', async () => {
+  const f = await setup(), wire = imageServer(f)
+  const adapter = adapterFor(f, { readImage: async () => { assert.fail('Tool screenshots must not be uploaded') } })
+  try {
+    const history = [user('Take a screenshot.', 'start'), toolPicture()]
+    const chunks = await collect(adapter.stream(options([...history, user('Continue after the screenshot.', 'next')])))
+    assert.equal(chunks.at(-1).type, 'finish')
+    const messages = payload(f.web.generations[0].prompt).messages
+    const result = messages.find(m => m.id === 'screenshot-result')
+    assert.equal(result.role, 'tool')
+    assert.equal(result.callId, 'screen-call')
+    assert.equal(result.isError, false)
+    assert.equal(result.content[0].text, 'Screenshot saved locally.')
+    assert.match(result.content[1].text, /visual content has not been inspected/)
+    assert.match(result.content[1].text, /not uploaded/)
+    assert(result.content[1].text.includes(ref.attachmentId))
+    assert.equal(messages.at(-1).content[0].text, 'Continue after the screenshot.')
+    assert.equal(wire.uploads.length, 0)
+    assert.deepEqual(f.web.generations[0].ref_file_ids, [])
+  } finally { await adapter.dispose(); await f.close() }
+})
+
+test('mixed user image and tool screenshot upload only the user image', async () => {
+  const f = await setup(), wire = imageServer(f), seen = []
+  const adapter = adapterFor(f, { readImage: async r => { seen.push(r.attachmentId); return bytes } })
+  try {
+    await collect(adapter.stream(options([picture(), toolPicture()])))
+    assert.deepEqual(seen, [ref.attachmentId])
+    assert.equal(wire.uploads.length, 1)
+    assert.deepEqual(f.web.generations[0].ref_file_ids, ['file-test-1'])
+    const result = payload(f.web.generations[0].prompt).messages.find(m => m.role === 'tool')
+    assert(result.content.every(b => b.type === 'text'))
+  } finally { await adapter.dispose(); await f.close() }
+})
+
+test('tool screenshot projection preserves errors and offload truth without accepting malformed references', () => {
+  const m = toolPicture(); m.isError = true; m.content[1].offloaded = true
+  const result = projectMessage(m)
+  assert.equal(result.isError, true)
+  assert.equal(result.callId, 'screen-call')
+  assert.match(result.content[1].text, /offloaded by the host/)
+  const invalid = toolPicture(); invalid.content[1].attachment = { ...ref, attachmentId: 'invalid' }
+  assert.throws(() => projectMessage(invalid), e => e.code === 'IMAGE_INPUT')
+  const badMark = toolPicture(); badMark.content[1].offloaded = false
+  assert.throws(() => projectMessage(badMark), e => e.code === 'IMAGE_INPUT')
+  for (const role of ['system', 'developer', 'assistant']) {
+    assert.throws(() => projectMessage({ ...toolPicture(), role }), e => e.code === 'UNSUPPORTED_CONTENT')
+  }
+})
 
 function imageServer(f) {
   const baseFetch = f.web.fetch

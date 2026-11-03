@@ -97,8 +97,13 @@ export class DeepSeekWebClient implements WebTransport {
     } finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
     let value: unknown
     try { value = JSON.parse(text) } catch { throw new LlmError('Unexpected Web response; inspect the official login/challenge.', 'WEB_PROTOCOL') }
-    if (!record(value) || !record(value.data)) throw new LlmError('Invalid Web response envelope.', 'WEB_PROTOCOL')
-    const code = Number(value.code), business = Number(value.data.biz_code)
+    if (!record(value)) throw new LlmError('Invalid Web response envelope.', 'WEB_PROTOCOL')
+    const code = Number(value.code)
+    // Authentication rejections can legitimately omit the success data envelope.
+    // Preserve their classification so the existing login lifecycle can recover.
+    if ([40003, 40001, 40002].includes(code)) throw new LlmError('DeepSeek Web rejected the operation.', 'AUTH')
+    if (!record(value.data)) throw new LlmError('Invalid Web response envelope.', 'WEB_PROTOCOL')
+    const business = Number(value.data.biz_code)
     if (code !== 0 || (business !== 0 && business !== 22)) {
       const auth = [40003, 40001, 40002].includes(code) || [40003, 40001, 40002].includes(business)
       throw new LlmError('DeepSeek Web rejected the operation.', auth ? 'AUTH' : business === 40029 ? 'WEB_CHALLENGE' : [40300, 40301].includes(business) ? 'POW_FAILED' : 'WEB_REJECTED')

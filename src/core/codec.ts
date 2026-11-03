@@ -28,10 +28,13 @@ export function projectMessage(value: unknown): InputMessage {
   if (!record(value) || typeof value.role !== 'string' || !Array.isArray(value.content)) throw new LlmError('Invalid model-visible message.', 'UNSUPPORTED_CONTENT')
   const content = value.content.filter(x => !(record(x) && x.type === 'reasoning')).map(x => {
     if (record(x) && x.type === 'image') {
-      if (value.role !== 'user') throw new LlmError('Only user images can be uploaded.', 'UNSUPPORTED_CONTENT')
+      if (value.role !== 'user' && value.role !== 'tool') throw new LlmError('Only user images can be uploaded.', 'UNSUPPORTED_CONTENT')
       const ref = imageRef(x.attachment)
+      if (x.offloaded !== undefined && x.offloaded !== true) throw new LlmError('Invalid image offload mark.', 'IMAGE_INPUT')
+      // Tool attachments remain in the native history, but must not trigger an upload
+      // or prevent later text turns. Preserve the absence of visual evidence explicitly.
+      if (value.role === 'tool') return { type: 'text', text: `[Tool image ${ref.attachmentId} (${ref.width}x${ref.height})${x.offloaded === true ? ' offloaded by the host' : ''}; image bytes were not uploaded and visual content has not been inspected. Use an authorized image-capable tool if visual inspection is required.]` }
       if (x.offloaded === true) return { type: 'text', text: `[Image ${ref.attachmentId} (${ref.width}x${ref.height}) offloaded by the host; visual content is omitted.]` }
-      if (x.offloaded !== undefined) throw new LlmError('Invalid image offload mark.', 'IMAGE_INPUT')
       return { type: 'image', attachment: ref }
     }
     if (!record(x) || !['text', 'tool-call', 'tool-addition', 'tool-removal'].includes(String(x.type))) throw new LlmError('DeepSeek Web accepts text and declared tools only.', 'UNSUPPORTED_CONTENT')

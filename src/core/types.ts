@@ -67,7 +67,7 @@ export interface WebSnapshot {
   status?: string
   usage?: number
   cleared?: boolean
-  clearError?: { code: 'RATE_LIMIT'; message: string }
+  clearError?: { code: 'RATE_LIMIT' | 'WEB_BUSY'; message: string }
 }
 export type WebEvent = { type: 'ready'; identity: WebIdentity }
   | { type: 'snapshot'; snapshot: WebSnapshot }

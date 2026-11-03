@@ -1,4 +1,4 @@
-import { loggedRateRejection } from '../local/rate-rejection.js'
+import { loggedRateRejection, loggedBackendBusyRejection } from '../local/rate-rejection.js'
 import type { RequestLease, GenerationFlight } from '../local/request-gate.js'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -97,6 +97,15 @@ export class SessionEngine {
     }
     for (const flight of lease.flights()!) {
       try {
+        const pending = await this.store.pending(flight.sessionKey)
+        if (pending?.id === flight.id && pending.accountKey === accountKey && pending.storeId === this.dependencies.storeId
+          && await loggedBackendBusyRejection(this.store.home, pending)) {
+          const saved = pending.native && await this.dependencies.native?.inspect(pending.native)
+          if (saved?.interrupted && !saved.message && await this.rateRequestAbsent(flight, client, signal)) {
+            await lease.finished(flight.id)
+            continue
+          }
+        }
         if (flight.rateRejected && flight.identity && await this.rateRequestAbsent(flight, client, signal)) {
           await lease.finished(flight.id)
           continue
@@ -313,7 +322,8 @@ export class SessionEngine {
     if (!operation.identity || operation.repair || operation.expected?.length) return false
     if (!operation.rateRejected) {
       const saved = operation.native && await this.dependencies.native?.inspect(operation.native)
-      if (!saved?.interrupted || saved.message || !(await loggedRateRejection(this.store.home, operation))) return false
+      if (!saved?.interrupted || saved.message || !(await loggedRateRejection(this.store.home, operation)
+        || await loggedBackendBusyRejection(this.store.home, operation))) return false
     }
     if (!(await this.rateRequestAbsent(operation, client, signal))) return false
     await this.rejectUnsubmitted(operation)
@@ -369,7 +379,7 @@ export class SessionEngine {
     const sessionKey = input.sessionId ? this.key(input.sessionId) : digest(['temporary', id])
     const release = await this.store.sessionLock(sessionKey, signal)
     let operation: ActiveOperation | undefined
-    let raw = '', reasoning = '', shown = '', shownReasoning = '', decoder: FinalDecoder | undefined, revision = false, withdrawn = false
+    let raw = '', reasoning = '', shown = '', shownReasoning = '', decoder: FinalDecoder | undefined, revision = false, withdrawn = false, busyRejected = false
     let lease: RequestLease | undefined
     let budgetSignal: AbortSignal | undefined
     let monitoring: ReturnType<typeof setInterval> | undefined
@@ -396,7 +406,8 @@ export class SessionEngine {
     }
     const rateWait = async (error: TokenFreeError) => {
       if (!recordedRates.has(error)) { await lease!.failed(error); recordedRates.add(error) }
-      this.dependencies.log?.write('model.queued', { operationId: id, code: 'RATE_LIMIT', stage: 'rate-limit-cooldown', attempt: ++rateAttempt })
+      this.dependencies.log?.write('model.queued', { operationId: id, code: error.code,
+        stage: error.code === 'WEB_BUSY' ? 'backend-busy-cooldown' : 'rate-limit-cooldown', attempt: ++rateAttempt })
       await lease!.wait(taskSignal)
       startBudget()
     }
@@ -483,7 +494,7 @@ export class SessionEngine {
       generation: for (;;) {
         taskSignal.throwIfAborted()
         decoder = new FinalDecoder(id)
-        raw = ''; reasoning = ''; revision = false
+        raw = ''; reasoning = ''; revision = false; busyRejected = false
         await lease.submission(taskSignal)
         startBudget()
         const beforeShown = shown, beforeReasoning = shownReasoning
@@ -499,6 +510,9 @@ export class SessionEngine {
               signal.throwIfAborted()
               if (event.type === 'event') {
                 this.dependencies.log?.content(id, 'web.event', { name: event.name, data: event.data, resume: resumes, step: repairAttempt })
+                if (event.name === 'hint' && record(event.data) && event.data.type === 'error' && event.data.clear_response === true
+                  && event.data.finish_reason === 'backend_busy' && !raw && !reasoning && shown === beforeShown
+                  && shownReasoning === beforeReasoning && !resumes && !repairAttempt) busyRejected = true
                 if (event.name === 'hint' && record(event.data) && event.data.type === 'error'
                   && event.data.finish_reason === 'rate_limit_reached' && !raw && !reasoning && shown === beforeShown && shownReasoning === beforeReasoning && !resumes) {
                   await this.update(operation, { rateRejected: true })
@@ -513,6 +527,8 @@ export class SessionEngine {
               }
               const snapshot: WebSnapshot = event.snapshot
               if (snapshot.cleared) {
+                if (snapshot.clearError?.code === 'WEB_BUSY' && busyRejected && !raw && !reasoning
+                  && shown === beforeShown && shownReasoning === beforeReasoning) throw new TokenFreeError(snapshot.clearError.message, 'WEB_BUSY')
                 if (snapshot.clearError?.code === 'RATE_LIMIT' && operation.rateRejected && !raw && !reasoning
                   && shown === beforeShown && shownReasoning === beforeReasoning) throw new TokenFreeError(snapshot.clearError.message, 'RATE_LIMIT')
                 withdrawn = true
@@ -533,18 +549,19 @@ export class SessionEngine {
             }
             break
           } catch (error) {
-            if (!signal.aborted && error instanceof TokenFreeError && error.code === 'RATE_LIMIT' && !raw && !reasoning
+            if (!signal.aborted && error instanceof TokenFreeError && !raw && !reasoning
               && shown === beforeShown && shownReasoning === beforeReasoning && !resumes
-              && (error.details?.accepted === false || operation.rateRejected && Boolean(operation.identity))) {
+              && (error.code === 'RATE_LIMIT' && (error.details?.accepted === false || operation.rateRejected && Boolean(operation.identity))
+                || error.code === 'WEB_BUSY' && busyRejected && Boolean(operation.identity))) {
               // Keep this native attempt and prompt. No assistant/tool batch has been delivered.
               // SSE refusal and non-root retries must also prove fresh, unchanged official ancestry.
-              if ((operation.rateRejected || operation.parentId !== null || operation.compaction)
+              if ((busyRejected || operation.rateRejected || operation.parentId !== null || operation.compaction)
                 && !(await metadata(active => this.rateRequestAbsent(operation!, client, active)))) throw error
               await this.update(operation, { stage: 'prepared', knownRejected: true, identity: undefined, rateRejected: false })
               await lease.finished(operation.id)
               await rateWait(error)
               // Recheck the parent after the wait, since a user can edit the website meanwhile.
-              if (operation.parentId !== null || operation.compaction) {
+              if (busyRejected || operation.parentId !== null || operation.compaction) {
                 if (!(await metadata(active => this.rateRequestAbsent(operation!, client, active)))) throw new TokenFreeError('Web parent changed while waiting; no request was repeated.', 'WEB_CONTEXT_CHANGED')
               }
               continue generation
@@ -655,6 +672,8 @@ export class SessionEngine {
         if ((error instanceof TokenFreeError && error.details?.accepted === false) || (operation.repair && operation.stage === 'prepared')) {
           await this.rejectUnsubmitted(operation)
         }
+        else if (busyRejected && error instanceof TokenFreeError && error.code === 'WEB_BUSY' && operation.identity
+          && await this.rateRequestAbsent(operation, client, AbortSignal.timeout(5000)).catch(() => false)) await this.rejectUnsubmitted(operation)
         else if (operation.rateRejected && await this.settleRateRejection(operation, client, AbortSignal.timeout(5000)).catch(() => false)) { /* no accepted response exists */ }
         else if (operation.verifiedPath) await this.update(operation, { stage: signal.aborted ? 'stopped' : 'failed', rebase: true, responseText: raw, reasoning })
         else if (operation.chatId && operation.stage !== 'prepared') await this.stop(operation, client)

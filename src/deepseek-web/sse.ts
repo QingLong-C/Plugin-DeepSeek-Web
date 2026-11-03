@@ -117,7 +117,9 @@ export async function* readWebEvents(response: Response, chatId: string, identit
     if (name === 'hint' && record(value)) {
       // A withdrawal is an action, not a cause. Keep the explicit service reason with it.
       const limited = value.finish_reason === 'rate_limit_reached'
-        ? { code: 'RATE_LIMIT' as const, message: 'DeepSeek 官网限流（rate_limit_reached）：消息发送过于频繁，请稍后重试。' } : undefined
+        ? { code: 'RATE_LIMIT' as const, message: 'DeepSeek 官网限流（rate_limit_reached）：消息发送过于频繁，请稍后重试。' }
+        : value.type === 'error' && value.finish_reason === 'backend_busy'
+          ? { code: 'WEB_BUSY' as const, message: 'DeepSeek 官网服务器繁忙（backend_busy），本次没有生成回答，请稍后重试。' } : undefined
       if (value.clear_response === true) { state.clear(limited); yield { type: 'snapshot', snapshot: state.snapshot() } }
       if (limited) throw new LlmError(limited.message, limited.code)
       return

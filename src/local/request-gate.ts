@@ -84,7 +84,7 @@ export class AccountRequestGate {
         submission: async active => { check(); await wait(Math.max(state.next, state.until), active); state.next = Date.now() + this.policy.intervalMs; await writeJson(this.path, state) },
         failed: async error => {
           check()
-          if (!(error instanceof TokenFreeError) || error.code !== 'RATE_LIMIT') return
+          if (!(error instanceof TokenFreeError) || !['RATE_LIMIT', 'WEB_BUSY'].includes(error.code)) return
           state.strikes = Math.min(state.strikes + 1, 32)
           const backoff = Math.min(this.policy.maxCooldownMs, this.policy.cooldownMs * 2 ** (state.strikes - 1))
           const hint = error.details?.retryAfterMs
