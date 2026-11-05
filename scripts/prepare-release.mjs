@@ -20,7 +20,7 @@ const tag = `v${version}`
 assert.equal(run('git', ['rev-parse', `${tag}^{commit}`]), commit, 'Local release tag must point to HEAD')
 assert.equal(run('git', ['ls-remote', `https://github.com/${repo}.git`, 'refs/heads/main']).split(/\s/)[0], commit, 'Remote main must match HEAD')
 // This standalone edition runs the complete gate locally; no remote CI is claimed.
-execFileSync('pnpm', ['check'], { cwd: root, stdio: 'inherit' })
+execFileSync('pnpm', ['check:offline'], { cwd: root, stdio: 'inherit' })
 const output = resolve(root, '.local', 'releases', version)
 assert(!existsSync(output), 'Release artifacts already exist; verify and reuse them instead of overwriting')
 const lines = readFileSync(resolve(root, 'CHANGELOG.md'), 'utf8').split('\n')
@@ -44,5 +44,5 @@ assert.equal(run('git', ['status', '--porcelain']), '', 'Package creation change
 assert.equal(run('git', ['rev-parse', 'HEAD']), commit, 'HEAD changed during package creation')
 writeFileSync(resolve(output, 'notes.md'), notes)
 writeFileSync(resolve(output, 'SHA256SUMS'), `${sha256}  ${packed.filename}\n`)
-writeFileSync(resolve(output, 'release.json'), `${JSON.stringify({ name, version, tag, commit, validation: 'local pnpm check', dsh: manifest.engines.dsh, node: process.version, tarball: packed.filename, sha256, integrity, size: bytes.length, fileCount: packed.files.length }, null, 2)}\n`)
+writeFileSync(resolve(output, 'release.json'), `${JSON.stringify({ name, version, tag, commit, validation: 'local pnpm check:offline', dsh: manifest.engines.dsh, node: process.version, tarball: packed.filename, sha256, integrity, size: bytes.length, fileCount: packed.files.length }, null, 2)}\n`)
 console.log(`Prepared ${name}@${version} at ${commit}. Artifacts: ${output}. Nothing published.`)

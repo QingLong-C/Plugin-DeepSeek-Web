@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { NetworkProtection, type NetworkPolicy } from '../local/network-protection.js'
 import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { MessageId, LlmError } from '@deepseek-ai/dsh-llm'
@@ -89,6 +90,17 @@ async function smoke(tools: boolean): Promise<void> {
 
 async function main(): Promise<void> {
   const command = process.argv[2]
+  if (command === 'protection') {
+    const protection = new NetworkProtection(dirname(defaultCredentialFile()))
+    const action = process.argv[3] ?? 'status'
+    if (action === 'login-only') await protection.setMode('login-only')
+    else if (action === 'normal') await protection.setMode('normal', process.argv.includes('--confirm-unblocked'))
+    else if (action === 'pause') await protection.pause()
+    else if (action === 'resume') await protection.resume(process.argv.includes('--confirm-unblocked'))
+    else if (action === 'policy' && process.argv[4]) await protection.setPolicy(strictJson(await readFile(process.argv[4], 'utf8')) as NetworkPolicy)
+    else if (action !== 'status') throw new TokenFreeError('Usage: dsh-tokenfree protection [status|login-only|normal --confirm-unblocked|pause|resume --confirm-unblocked|policy settings.json]', 'INVALID_POLICY')
+    console.log(JSON.stringify(await protection.status(), null, 2)); return
+  }
   if (command === 'policy') {
     const id = process.argv[3], file = process.argv[4]
     if (!id || id.length > 512) throw new TokenFreeError('Usage: dsh-tokenfree policy <sessionId> [settings.json]', 'INVALID_POLICY')
@@ -136,7 +148,7 @@ async function main(): Promise<void> {
   }
   if (command === 'smoke') return smoke(process.argv.includes('--tools'))
   // readline is not used for credentials; it would echo pasted tokens.
-  console.log('dsh-tokenfree policy <sessionId> [settings.json] | usage <sessionId> | inspect [sessionId] | rebuild <sessionId> | login | doctor | smoke [--tools] | auth [--stdin] (advanced)')
+  console.log('dsh-tokenfree protection [status|login-only|normal --confirm-unblocked|pause|resume --confirm-unblocked|policy settings.json] | policy <sessionId> [settings.json] | usage <sessionId> | inspect [sessionId] | rebuild <sessionId> | login | doctor | smoke [--tools] | auth [--stdin] (advanced)')
 }
 
 main().catch(error => {

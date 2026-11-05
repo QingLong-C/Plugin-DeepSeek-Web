@@ -32,13 +32,13 @@ export interface RequestLease {
   succeeded(): Promise<void>
   release(): Promise<void>
 }
-/** Retry-After is advisory, bounded to one day; never interpret arbitrary prose as a duration. */
+/** Preserve the server lower bound; unrepresentable waits saturate and require manual review. */
 export function retryAfterMs(value: string | null, now = Date.now()): number | undefined {
   if (!value) return undefined
   const text = value.trim()
   const milliseconds = /^\d+$/.test(text) ? Number(text) * 1000
     : /^[A-Za-z]{3}, \d{2} [A-Za-z]{3} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(text) ? Date.parse(text) - now : NaN
-  return Number.isFinite(milliseconds) && milliseconds >= 0 ? Math.min(milliseconds, 86_400_000) : undefined
+  return milliseconds >= 0 && !Number.isNaN(milliseconds) ? Math.min(milliseconds, Number.MAX_SAFE_INTEGER) : undefined
 }
 /** One cross-process FIFO lease per account, independent of credentials and session journals. */
 export class AccountRequestGate {
@@ -88,7 +88,7 @@ export class AccountRequestGate {
           state.strikes = Math.min(state.strikes + 1, 32)
           const backoff = Math.min(this.policy.maxCooldownMs, this.policy.cooldownMs * 2 ** (state.strikes - 1))
           const hint = error.details?.retryAfterMs
-          state.until = Math.max(state.until, Date.now() + backoff, Date.now() + (Number.isFinite(hint) && hint! >= 0 ? Math.min(hint!, 86_400_000) : 0))
+          state.until = Math.max(state.until, Date.now() + backoff, Math.min(Number.MAX_SAFE_INTEGER, Date.now() + (Number.isFinite(hint) && hint! >= 0 ? hint! : 0)))
           await writeJson(this.path, state)
         },
         succeeded: async () => { check(); state.strikes = 0; state.until = 0; await writeJson(this.path, state) },

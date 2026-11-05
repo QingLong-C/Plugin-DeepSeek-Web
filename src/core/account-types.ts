@@ -5,6 +5,7 @@ export interface AccountStatus {
   message: string
   configured: boolean
   busy: boolean
+  protection?: import('../local/network-protection.js').ProtectionStatus
   lastValidatedAt?: number
 }
 

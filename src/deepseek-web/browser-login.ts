@@ -1,3 +1,4 @@
+import { NetworkProtection } from '../local/network-protection.js'
 import { mkdir, chmod, lstat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -69,6 +70,8 @@ export class ManagedBrowserLogin implements BrowserLogin {
 
   async obtain({ interactive, signal: input, epoch }: LoginRequest): Promise<WebCredential | undefined> {
     input.throwIfAborted()
+    const protection = new NetworkProtection(dirname(this.profile))
+    await protection.check(input, interactive)
     const revoked = new AbortController()
     const signal = AbortSignal.any([input, revoked.signal])
     this.operationId = randomUUID()
@@ -81,13 +84,13 @@ export class ManagedBrowserLogin implements BrowserLogin {
     }
     const release = await acquireLock(join(dirname(this.profile), 'locks', 'browser'), AbortSignal.any([signal, AbortSignal.timeout(15_000)]))
     let polling = false, finished = false
-    const watch = epoch === undefined ? undefined : setInterval(() => {
+    const watch = setInterval(() => {
       if (polling || finished) return
       polling = true
-      void new LocalStore(dirname(this.profile)).account().then(account => {
-        if (!finished && account.epoch !== epoch) revoked.abort(new LlmError('登录已被其他入口撤销，请重新登录。 [LOGIN_REVOKED]', 'LOGIN_REVOKED'))
-      }).catch(() => {
-        if (!finished) revoked.abort(new LlmError('无法核实本机登录状态。', 'AUTH_STORAGE'))
+      void protection.check(signal, interactive).then(() => new LocalStore(dirname(this.profile)).account()).then(account => {
+        if (!finished && epoch !== undefined && account.epoch !== epoch) revoked.abort(new LlmError('登录已被其他入口撤销，请重新登录。 [LOGIN_REVOKED]', 'LOGIN_REVOKED'))
+      }).catch(error => {
+        if (!finished) revoked.abort(error instanceof LlmError ? error : new LlmError('无法核实本机登录状态。', 'AUTH_STORAGE'))
       }).finally(() => { polling = false })
     }, 200)
     try {
@@ -108,14 +111,30 @@ export class ManagedBrowserLogin implements BrowserLogin {
         if (epoch !== undefined && (await new LocalStore(dirname(this.profile)).account()).epoch !== epoch) {
           throw new LlmError('登录已被其他入口撤销，请重新登录。 [LOGIN_REVOKED]', 'LOGIN_REVOKED')
         }
+        await protection.check(signal, interactive)
         await this.diagnostic('started', phase)
-        this.context = await (this.dependencies.launch ?? chromium.launchPersistentContext.bind(chromium))(this.profile, {
+        this.context = await protection.run('/login/browser-launch', signal, () => (this.dependencies.launch ?? chromium.launchPersistentContext.bind(chromium))(this.profile, {
           channel: 'chrome', headless: !interactive, chromiumSandbox: true,
           viewport: { width: 960, height: 760 }, acceptDownloads: false,
           ignoreDefaultArgs: ['--password-store=basic', '--use-mock-keychain'],
-          env, timeout: 30_000,
-        })
+          env, timeout: 30_000, serviceWorkers: 'block',
+        }), interactive)
         signal.throwIfAborted()
+        // Production contexts always support routing. Injected test contexts may
+        // omit it; no real browser is created by those fixtures.
+        if (this.context.route) {
+          await this.context.route('**/*', async route => {
+            const url = new URL(route.request().url())
+            if (!['http:', 'https:'].includes(url.protocol)) { await route.fallback(); return }
+            try { await protection.run(url.pathname, signal, () => route.fallback(), interactive) }
+            catch (error) { if (!(error instanceof LlmError) || error.code !== 'ACCOUNT_LOGIN_ONLY') revoked.abort(error); await route.abort().catch(() => {}) }
+          })
+          this.context.on('response', response => {
+            void response.allHeaders().then(headers => response.status() >= 200 ? protection.observe(new Response(null, { status: response.status(), headers: { 'retry-after': headers['retry-after'] ?? '' } })) : undefined)
+              .catch(error => revoked.abort(error))
+          })
+        }
+        await protection.check(signal, interactive)
         const page = this.context.pages()[0] ?? await this.context.newPage()
         phase = 'navigate'
         await this.diagnostic('waiting', phase)
@@ -155,7 +174,7 @@ export class ManagedBrowserLogin implements BrowserLogin {
               try {
                 phase = 'verify'
                 await this.diagnostic('waiting', phase)
-                const check = this.dependencies.check ?? ((value, checkSignal) => new DeepSeekWebClient(value, { diagnostics: this.log, operationId: this.operationId }).check(checkSignal))
+                const check = this.dependencies.check ?? ((value, checkSignal) => new DeepSeekWebClient(value, { diagnostics: this.log, operationId: this.operationId, protectionHome: dirname(this.profile), login: interactive }).check(checkSignal))
                 await check(credential, AbortSignal.any([signal, AbortSignal.timeout(15_000)]))
                 await this.diagnostic('authorized', phase)
                 return credential

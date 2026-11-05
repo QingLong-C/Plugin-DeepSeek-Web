@@ -17,6 +17,8 @@ export interface AccountActions {
   operationStatus?(sessionId?: string): Promise<OperationStatus>
   verifyPending?(sessionId: string, operationId: string): Promise<OperationStatus>
   stopPending?(sessionId: string, operationId: string): Promise<OperationStatus>
+  pauseNetwork?(): Promise<AccountStatus>
+  resumeNetwork?(confirmed: boolean): Promise<AccountStatus>
   status(): Promise<AccountStatus>
   login(): Promise<AccountStatus>
   restore(): Promise<AccountStatus>
@@ -129,11 +131,13 @@ export function AccountSettings({ actions }: { actions: AccountActions }) {
   const accountAction = async (action: () => Promise<AccountStatus>) => {
     const next = await action(); if (alive.current) setStatus(next)
   }
-  const connected = status?.state === 'connected' && !hostError
+  const networkBlocked = Boolean(status?.protection?.paused || status?.protection && status.protection.until > Date.now())
+  const loginOnly = status?.protection?.mode === 'login-only'
+  const connected = status?.state === 'connected' && !hostError && !networkBlocked && !loginOnly
   const activeSummary = usage?.generation?.purpose === 'compaction' && usage.generation.stage === 'receiving'
   const running = operation?.sessionId ? actions.running?.(operation.sessionId) : false
   const needsVerification = Boolean(operation?.pending && (!running || operation.stage === 'uncertain') && !activeSummary)
-  const accountText = hostError ? '未连接' : status ? labels[status.state] : '—'
+  const accountText = hostError ? '未连接' : networkBlocked ? '网络已暂停' : loginOnly ? '仅登录' : status ? labels[status.state] : '—'
   const selected = sessionId ? selection?.selected : selection?.defaultSelected
   let dshText = !selection || selected === undefined ? '—' : connected && selected ? '已启用' : '未启用'
   if (connected && selected) {
@@ -154,15 +158,17 @@ export function AccountSettings({ actions }: { actions: AccountActions }) {
       <header className="dsh-tokenfree-header">
         <h2><a href="https://chat.deepseek.com/" target="_blank" rel="noopener noreferrer">DeepSeek Web</a></h2>
         <div className="dsh-tokenfree-actions">
+          {actions.pauseNetwork && !networkBlocked && <button disabled={disabled} title="暂停本插件所有官网请求，保留账号与会话" onClick={() => { void run('暂停', () => accountAction(() => actions.pauseNetwork!())) }}>暂停</button>}
+          {actions.resumeNetwork && networkBlocked && <button disabled={disabled || (status?.protection?.until ?? 0) > Date.now()} title="仅在确认账号限制解除后恢复；保留累计请求记录和待核实请求" onClick={() => { void run('恢复', () => accountAction(() => actions.resumeNetwork!(true))) }}>确认解封并恢复</button>}
           {connected && actions.enable && selection?.available && !selected && !operation?.pending && <button data-primary title={sessionId ? '用于当前会话，并设为当前 DSH 配置默认' : '设为当前 DSH 配置默认'} disabled={disabled} onClick={() => { void run('使用', async () => {
             const id = actions.sessionId?.(); await actions.enable!(id); await refreshSelection(id)
           }) }}>使用</button>}
           {activeSummary && sessionId && usage?.generation?.operationId && usage.generation.compactionId && actions.cancelSummary && <button disabled={disabled} onClick={() => { void run('停止摘要', () => actions.cancelSummary!(sessionId, usage!.generation!.operationId, usage!.generation!.compactionId!), sessionId) }}>停止摘要</button>}
-          {needsVerification && sessionId && operation?.operationId && actions.verifyPending && <button disabled={disabled} onClick={() => { void run('核实', async () => { const id = sessionId; const next = await actions.verifyPending!(id, operation.operationId!); if (alive.current && id === actions.sessionId?.()) setOperation(next) }, sessionId) }}>核实</button>}
-          {needsVerification && sessionId && operation?.operationId && actions.stopPending && <button disabled={disabled} title="停止原请求并核实，不会撤销已执行的工具" onClick={() => { void run('停止并核实', async () => { const id = sessionId; const next = await actions.stopPending!(id, operation.operationId!); if (alive.current && id === actions.sessionId?.()) setOperation(next) }, sessionId) }}>停止并核实</button>}
+          {!networkBlocked && needsVerification && sessionId && operation?.operationId && actions.verifyPending && <button disabled={disabled} onClick={() => { void run('核实', async () => { const id = sessionId; const next = await actions.verifyPending!(id, operation.operationId!); if (alive.current && id === actions.sessionId?.()) setOperation(next) }, sessionId) }}>核实</button>}
+          {!networkBlocked && needsVerification && sessionId && operation?.operationId && actions.stopPending && <button disabled={disabled} title="停止原请求并核实，不会撤销已执行的工具" onClick={() => { void run('停止并核实', async () => { const id = sessionId; const next = await actions.stopPending!(id, operation.operationId!); if (alive.current && id === actions.sessionId?.()) setOperation(next) }, sessionId) }}>停止并核实</button>}
           {status?.busy ? <button disabled={disabled} onClick={() => { void run('取消', () => accountAction(() => actions.cancel())) }}>取消</button>
             : connected ? <button disabled={disabled} title="退出本机桌面、CLI 和 Web 的 DeepSeek Web 连接" onClick={() => { void run('退出', () => accountAction(() => actions.logout())) }}>退出</button>
-              : <button data-primary disabled={disabled} onClick={() => { void run('登录', () => accountAction(() => actions.login())) }}>登录</button>}
+              : <button data-primary disabled={disabled || networkBlocked} onClick={() => { void run('登录', () => accountAction(() => actions.login())) }}>登录</button>}
         </div>
       </header>
       <div className="dsh-tokenfree-status" role="status">

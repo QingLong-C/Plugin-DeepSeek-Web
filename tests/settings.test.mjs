@@ -21,11 +21,13 @@ test('settings UI handles login, automatic completion and logout without token e
   await build({ entryPoints: ['src/dsh/client/AccountSettings.tsx'], outfile: file, bundle: true, platform: 'node', format: 'esm', jsx: 'automatic', external: ['react', 'react/jsx-runtime'] })
   const { AccountSettings } = await import(pathToFileURL(file).href)
   let state = { state: 'signed-out', message: 'fixture-signed-out', configured: false, busy: false }
-  let logins = 0, logouts = 0, enables = 0, selected = false
+  let logins = 0, logouts = 0, pauses = 0, resumes = 0, enables = 0, selected = false
   const actions = {
     sessionId: () => 'fixture-session',
     selection: async id => ({ sessionId: id, selected, defaultSelected: false, available: true }),
     enable: async id => { assert.equal(id, 'fixture-session'); enables++; selected = true },
+    pauseNetwork: async () => { pauses++; state = { ...state, protection: { paused: true, until: 0 } }; return state },
+    resumeNetwork: async confirmed => { assert.equal(confirmed,true); resumes++; state = { ...state, protection: { paused: false, until: 0 } }; return state },
     status: async () => state,
     restore: async () => state,
     login: async () => { logins++; state = { state: 'signing-in', message: 'fixture-signing-in', configured: false, busy: true }; return state },
@@ -49,6 +51,19 @@ test('settings UI handles login, automatic completion and logout without token e
     fireEvent.click(ui.getByRole('button', { name: '使用' }))
     await waitFor(() => assert.equal(ui.getByTestId('tokenfree-state').textContent, '已启用'))
     assert.equal(enables, 1)
+    fireEvent.click(ui.getByRole('button', { name: '暂停' }))
+    await waitFor(() => assert.ok(ui.getByText('网络已暂停')))
+    assert.equal(ui.getByRole('button', { name: '登录' }).disabled, true)
+    assert.equal(pauses, 1)
+    fireEvent.click(ui.getByRole('button', { name: '确认解封并恢复' }))
+    await waitFor(() => assert.ok(ui.getByText('已连接')))
+    assert.equal(resumes, 1)
+    state = { ...state, protection: { mode: 'login-only', paused: false, until: 0 } }
+    await waitFor(() => assert.ok(ui.getByText('仅登录')), { timeout: 2500 })
+    assert.equal(ui.getByRole('button', { name: '登录' }).disabled, false)
+    assert.equal(ui.queryByRole('button', { name: '使用' }), null)
+    state = { ...state, protection: { mode: 'normal', paused: false, until: 0 } }
+    await waitFor(() => assert.ok(ui.getByRole('button', { name: '退出' })), { timeout: 2500 })
     fireEvent.click(ui.getByRole('button', { name: '退出' }))
     await waitFor(() => assert.ok(ui.getByText('未连接')))
     assert.equal(logouts, 1)
@@ -67,14 +82,14 @@ test('built DSH client bundle mounts its Remote namespace and contributes a disp
   const require = createRequire(import.meta.url)
   vm.runInNewContext(source, { window: { __ModuleLoader__: { load({ id, factory }) { assert.equal(id, 'dsh-tokenfree'); client = factory(require) } } } })
   const handlers = []
-  const remote = Object.fromEntries(['status', 'login', 'restore', 'cancel', 'logout'].map(method => [method, async () => ({ ok: true, value: { state: 'signed-out', message: '', configured: false, busy: false } })]))
+  const remote = Object.fromEntries(['status', 'login', 'restore', 'cancel', 'logout', 'pauseNetwork', 'resumeNetwork'].map(method => [method, async () => ({ ok: true, value: { state: 'signed-out', message: '', configured: false, busy: false } })]))
   remote.defaultModel = async () => ({ ok: true, value: { available: true, selected: defaults } })
   remote.useDefault = async () => { defaults = true; defaultWrites++; return { ok: true, value: { available: true, selected: true } } }
   const ctx = {
     get: name => services[name],
     remote: { tokenfree: remote, session: { selectModel: async request => { selections.push(request); projection.next = request; return { ok: true, value: { selected: request } } } }, $mount: async info => {
       mounted++; assert.equal(info.package, 'dsh-tokenfree')
-      assert.deepEqual(Array.from(info.descriptors, method => method.method).sort(), ['cancel', 'cancelSummary', 'defaultModel', 'inspect', 'login', 'logout', 'operationStatus', 'policy', 'rebuild', 'restore', 'setPolicy', 'status', 'stopPending', 'usage', 'useDefault', 'verifyPending'])
+      assert.deepEqual(Array.from(info.descriptors, method => method.method).sort(), ['cancel', 'cancelSummary', 'defaultModel', 'inspect', 'login', 'logout', 'operationStatus', 'pauseNetwork', 'policy', 'rebuild', 'restore', 'resumeNetwork', 'setPolicy', 'status', 'stopPending', 'usage', 'useDefault', 'verifyPending'])
       return async () => { unmounted++ }
     } },
     slots: {
@@ -90,6 +105,7 @@ test('built DSH client bundle mounts its Remote namespace and contributes a disp
   const dispose = await client.apply(ctx)
   assert.equal(mounted, 1); assert.equal(registered, 1)
   assert.equal(nativeActions.sessionId(), 'fixture-session')
+  await nativeActions.pauseNetwork(); await nativeActions.resumeNetwork(true)
   await nativeActions.enable('fixture-session')
   assert.deepEqual(JSON.parse(JSON.stringify(selections)), [{ sessionId: 'fixture-session', provider: 'tokenfree-deepseek-web', model: 'web-default' }])
   assert.equal(defaultWrites, 0, 'native selection owns its existing default save')

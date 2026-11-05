@@ -1,6 +1,6 @@
 {
   "name": "dsh-tokenfree",
-  "version": "1.5.6",
+  "version": "1.6.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QingLong-C/Plugin-DeepSeek-Web.git"
@@ -97,7 +97,8 @@
     "src/dsh/compaction.ts",
     "src/dsh/index.ts",
     "src/dsh/strict-schema.ts",
-    "src/dsh/agent-context.ts"
+    "src/dsh/agent-context.ts",
+    "ACCOUNT_PROTECTION.md"
   ],
   "engines": {
     "node": "^22.19.0 || >=24",
@@ -134,7 +135,8 @@
     "build:client": "node scripts/build-client.mjs",
     "login": "node lib/cli.js login",
     "test:browser": "pnpm build && node --test --test-name-pattern='^real Chrome ' tests/browser-login.test.mjs",
-    "release:prepare": "node scripts/prepare-release.mjs"
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "check:offline": "node scripts/check-offline.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.5",

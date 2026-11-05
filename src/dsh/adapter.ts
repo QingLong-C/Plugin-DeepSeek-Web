@@ -138,10 +138,10 @@ export class TokenFreeAdapter extends LlmAdapter {
     const credential = await (this.dependencies.credential?.(signal) ?? resolveCredential(this.config.credentialFile))
     if (!credential.accountId) {
       if (this.dependencies.client) throw new TokenFreeError('Credentials need an explicit identity.', 'ACCOUNT_ID_UNKNOWN')
-      await new DeepSeekWebClient(credential).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
+      await new DeepSeekWebClient(credential, { protectionHome: this.store.home }).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
     }
     const client = this.dependencies.client?.(credential, { diagnostics: this.dependencies.diagnostics, operationId })
-      ?? new DeepSeekWebClient(credential, { diagnostics: this.dependencies.diagnostics, headers: attributionHeaders() })
+      ?? new DeepSeekWebClient(credential, { protectionHome: this.store.home, diagnostics: this.dependencies.diagnostics, headers: attributionHeaders() })
     const settled = await engine.verifyPending(digest(['deepseek-web-account', credential.accountId]), client, signal, sessionId, operationId, requestStop)
     return { ...await this.operationStatus(sessionId), settled }
   }
@@ -159,10 +159,10 @@ export class TokenFreeAdapter extends LlmAdapter {
     this.dependencies.diagnostics?.protect(credential)
     if (!credential.accountId) {
       if (this.dependencies.client) throw new TokenFreeError('Injected credentials require an explicit account identity.', 'ACCOUNT_ID_UNKNOWN')
-      await new DeepSeekWebClient(credential).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
+      await new DeepSeekWebClient(credential, { protectionHome: this.store.home }).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
     }
     const client = this.dependencies.client?.(credential, { diagnostics: this.dependencies.diagnostics, operationId: randomUUID() })
-      ?? new DeepSeekWebClient(credential, { diagnostics: this.dependencies.diagnostics, headers: attributionHeaders() })
+      ?? new DeepSeekWebClient(credential, { protectionHome: this.store.home, diagnostics: this.dependencies.diagnostics, headers: attributionHeaders() })
     const accountKey = digest(['deepseek-web-account', credential.accountId])
     const lease = await this.store.requestGate(accountKey).enter(signal)
     try {
@@ -246,11 +246,11 @@ export class TokenFreeAdapter extends LlmAdapter {
       if (!credential.accountId) {
         // Existing MVP credentials are upgraded by read-only official account verification, not by guessing from a token.
         if (this.dependencies.client) throw new TokenFreeError('Injected credentials require an explicit account identity.', 'ACCOUNT_ID_UNKNOWN')
-        await new DeepSeekWebClient(credential).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
+        await new DeepSeekWebClient(credential, { protectionHome: this.store.home }).check(AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]))
       }
       const accountKey = digest(['deepseek-web-account', credential.accountId])
       const client = this.dependencies.client?.(credential, { diagnostics: log, operationId })
-        ?? new DeepSeekWebClient(credential, { diagnostics: log, operationId, headers: attributionHeaders() })
+        ?? new DeepSeekWebClient(credential, { protectionHome: this.store.home, diagnostics: log, operationId, headers: attributionHeaders() })
       const indexes = new Map<'text' | 'reasoning', number>()
       let index = 0
       log?.write('model.started', { operationId })

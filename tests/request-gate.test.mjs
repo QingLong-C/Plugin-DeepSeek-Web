@@ -37,14 +37,14 @@ test('cooldown survives recreation, doubles on consecutive rate limits, and Retr
 }))
 test('all submissions including correction share pacing; success clears backoff, auth and transport do not trigger rate retries',()=>fixture(async home=>{
  const gate=new AccountRequestGate(home,account,policy), lease=await gate.enter(AbortSignal.timeout(2000))
- await lease.submission(AbortSignal.timeout(2000));const start=Date.now();await lease.submission(AbortSignal.timeout(2000));assert(Date.now()-start>=25)
+ const submittedAt=Date.now();await lease.submission(AbortSignal.timeout(2000));const deadline=JSON.parse(await readFile(join(home,'requests',account+'.json'),'utf8')).next;assert(deadline>=submittedAt+policy.intervalMs);await lease.submission(AbortSignal.timeout(2000));assert(Date.now()>=deadline)
  await lease.failed(new TokenFreeError('network','TRANSPORT'));await lease.succeeded();await lease.release()
  const state=JSON.parse(await readFile(join(home,'requests',account+'.json'),'utf8'));assert.equal(state.strikes,0);assert.equal(state.until,0)
 }))
-test('Retry-After accepts seconds and future dates, rejects malformed/negative/non-finite and bounds huge hints',()=>{
+test('Retry-After accepts seconds and future dates, rejects malformed/negative/non-finite and preserves long hints',()=>{
  assert.equal(retryAfterMs('2',0),2000);assert.equal(retryAfterMs('Thu, 01 Jan 1970 00:00:03 GMT',1000),2000)
  for(const value of [null,'no','-2','Infinity','1.5'])assert.equal(retryAfterMs(value,0),undefined)
- assert.equal(retryAfterMs('99999999999',0),86400000)
+ assert.equal(retryAfterMs('99999999999',0),99999999999000)
 })
 
 test('cross-process account owner blocks followers and a crashed owner is recovered without clearing cooldown',()=>fixture(async home=>{

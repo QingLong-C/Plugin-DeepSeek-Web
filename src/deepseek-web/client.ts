@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { NetworkProtection } from '../local/network-protection.js'
 import { TokenFreeError as LlmError, record } from '../core/errors.js'
 import type { WebCredential } from '../local/auth.js'
 import { parseChallenge, solveChallenge } from './pow.js'
@@ -11,8 +13,11 @@ import { fileId, fileIds, imageRef } from '../core/images.js'
 import { retryAfterMs } from '../local/request-gate.js'
 
 const ORIGIN = 'https://chat.deepseek.com'
+const settingsCache = new Map<string, { at: number; value: Promise<WebSettings> }>()
 export type Fetch = typeof fetch
 export interface ClientDependencies {
+  login?: boolean
+  protectionHome?: string
   fetch?: Fetch
   solve?: (challenge: Challenge, signal: AbortSignal) => Promise<string>
   diagnostics?: LocalDiagnostics
@@ -43,11 +48,13 @@ export function webMessage(value: unknown): WebMessage {
 
 /** Official transport operations only; no native DSH objects or orchestration decisions. */
 export class DeepSeekWebClient implements WebTransport {
+  private readonly protection?: NetworkProtection
   private fetchImpl: Fetch
   private solve: NonNullable<ClientDependencies['solve']>
   constructor(private credential: WebCredential, private dependencies: ClientDependencies = {}) {
+    this.protection = dependencies.protectionHome !== undefined || !dependencies.fetch ? new NetworkProtection(dependencies.protectionHome) : undefined
     this.fetchImpl = dependencies.fetch ?? fetch
-    this.solve = dependencies.solve ?? solveChallenge
+    this.solve = dependencies.solve ?? ((challenge, signal) => solveChallenge(challenge, signal, { protectionHome: dependencies.protectionHome }))
     dependencies.diagnostics?.protect(credential)
   }
   bindOperation(id: string): void { this.dependencies.operationId = id }
@@ -58,18 +65,27 @@ export class DeepSeekWebClient implements WebTransport {
       'x-client-timezone-offset': String(-new Date().getTimezoneOffset() * 60),
       ...(this.credential.cookie ? { cookie: this.credential.cookie } : {}) }
   }
+  private async protectedFetch(path: string, init: RequestInit & { signal: AbortSignal }): Promise<Response> {
+    const send = () => {
+      this.dependencies.diagnostics?.write('http.started', { endpoint: path.split('?')[0], operationId: this.dependencies.operationId })
+      return this.fetchImpl(`${ORIGIN}${path}`, init)
+    }
+    const response = this.protection ? await this.protection.run(path, init.signal, send, this.dependencies.login === true && path === '/api/v0/users/current') : await send()
+    try { await this.protection?.observe(response) }
+    catch { await response.body?.cancel().catch(() => {}); throw new LlmError('Cannot persist the Web protection response; acceptance must be verified.', 'STATE_STORAGE') }
+    return response
+  }
   private async request(path: string, body: unknown | undefined, signal: AbortSignal, extra: Record<string, string> = {}): Promise<Response> {
     signal.throwIfAborted()
     const startedAt = Date.now()
     const meta = { endpoint: path.split('?')[0], operationId: this.dependencies.operationId }
-    this.dependencies.diagnostics?.write('http.started', meta)
     if (body !== undefined && this.dependencies.operationId && !path.endsWith('/create_pow_challenge')) {
       this.dependencies.diagnostics?.content(this.dependencies.operationId, 'web.request', { method: 'POST', endpoint: path, body })
     }
     let response: Response
-    try { response = await this.fetchImpl(`${ORIGIN}${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { ...this.headers(), ...extra },
+    try { response = await this.protectedFetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { ...this.headers(), ...extra },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal, redirect: 'error' }) }
-    catch (error) { this.dependencies.diagnostics?.write('http.failed', { ...meta, elapsedMs: Date.now() - startedAt, ...failureCategory(error) }); if (signal.aborted) throw error; throw new LlmError('Web transport disconnected; acceptance must be verified.', 'TRANSPORT') }
+    catch (error) { this.dependencies.diagnostics?.write('http.failed', { ...meta, elapsedMs: Date.now() - startedAt, ...failureCategory(error) }); if (signal.aborted || error instanceof LlmError) throw error; throw new LlmError('Web transport disconnected; acceptance must be verified.', 'TRANSPORT') }
     this.dependencies.diagnostics?.write('http.completed', { ...meta, elapsedMs: Date.now() - startedAt, httpStatus: response.status })
     if (!response.ok) {
       await response.body?.cancel()
@@ -110,9 +126,19 @@ export class DeepSeekWebClient implements WebTransport {
     if (!record(value.data)) throw new LlmError('Invalid Web response envelope.', 'WEB_PROTOCOL')
     if (code !== 0 || (business !== 0 && business !== 22)) {
       const auth = [40003, 40001, 40002].includes(code) || [40003, 40001, 40002].includes(business)
-      throw new LlmError('DeepSeek Web rejected the operation.', auth ? 'AUTH' : business === 40029 ? 'WEB_CHALLENGE' : [40300, 40301].includes(business) ? 'POW_FAILED' : 'WEB_REJECTED')
+      const error = new LlmError('DeepSeek Web rejected the operation.', auth ? 'AUTH' : business === 40029 ? 'WEB_CHALLENGE' : [40300, 40301].includes(business) ? 'POW_FAILED' : 'WEB_REJECTED')
+      await this.flagRejection(error)
+      throw error
     }
     return { code: business, value: value.data.biz_data }
+  }
+  private async flagRejection(error: unknown): Promise<void> {
+    try { await this.protection?.rejected(error) }
+    catch { throw new LlmError('Cannot persist the Web refusal; acceptance must be verified.', 'STATE_STORAGE') }
+  }
+  private async *protectedEvents(response: Response, chatId: string, identity: WebIdentity | undefined, signal: AbortSignal): AsyncIterable<WebEvent> {
+    try { yield* readWebEvents(response, chatId, identity, signal) }
+    catch (error) { await this.flagRejection(error); throw error }
   }
   private async *generationEvents(response: Response, chatId: string, signal: AbortSignal): AsyncIterable<WebEvent> {
     if (!response.headers.get('content-type')?.includes('text/event-stream')) {
@@ -127,7 +153,7 @@ export class DeepSeekWebClient implements WebTransport {
       }
       throw new LlmError('Expected a Web event stream.', 'WEB_PROTOCOL')
     }
-    yield* readWebEvents(response, chatId, undefined, signal)
+    yield* this.protectedEvents(response, chatId, undefined, signal)
   }
   private async json(path: string, body: unknown | undefined, signal: AbortSignal): Promise<unknown> {
     const result = await this.envelope(await this.request(path, body, signal))
@@ -183,12 +209,11 @@ export class DeepSeekWebClient implements WebTransport {
     delete headers['content-type']
     Object.assign(headers, { 'x-file-size': String(ref.bytes), 'x-ds-pow-response': proof, 'x-thinking-enabled': thinking ? '1' : '0', 'x-model-type': 'default' })
     const meta = { endpoint: target, operationId: this.dependencies.operationId }, startedAt = Date.now()
-    this.dependencies.diagnostics?.write('http.started', meta)
     let response: Response
-    try { response = await this.fetchImpl(`${ORIGIN}${target}`, { method: 'POST', headers, body: form, signal, redirect: 'error' }) }
+    try { response = await this.protectedFetch(target, { method: 'POST', headers, body: form, signal, redirect: 'error' }) }
     catch (error) {
       this.dependencies.diagnostics?.write('http.failed', { ...meta, elapsedMs: Date.now() - startedAt, ...failureCategory(error) })
-      if (signal.aborted) throw error
+      if (signal.aborted || error instanceof LlmError) throw error
       throw new LlmError('Image upload disconnected; it was not repeated.', 'TRANSPORT')
     }
     this.dependencies.diagnostics?.write('http.completed', { ...meta, elapsedMs: Date.now() - startedAt, httpStatus: response.status })
@@ -214,7 +239,7 @@ export class DeepSeekWebClient implements WebTransport {
   }
   async *resume(identity: WebIdentity, signal: AbortSignal): AsyncIterable<WebEvent> {
     const response = await this.request('/api/v0/chat/resume_stream', { chat_session_id: identity.chatId, message_id: identity.responseId }, signal, { accept: 'text/event-stream, application/json' })
-    if (response.headers.get('content-type')?.includes('text/event-stream')) { yield* readWebEvents(response, identity.chatId, identity, signal); return }
+    if (response.headers.get('content-type')?.includes('text/event-stream')) { yield* this.protectedEvents(response, identity.chatId, identity, signal); return }
     const result = await this.envelope(response)
     if (result.code !== 22 || !record(result.value)) throw new LlmError('Unexpected resume response.', 'WEB_PROTOCOL')
     yield { type: 'event', name: 'resume.full_message', data: result.value }
@@ -235,6 +260,25 @@ export class DeepSeekWebClient implements WebTransport {
     })
   }
   async settings(deviceId: string, signal: AbortSignal): Promise<WebSettings> {
+    signal.throwIfAborted()
+    await this.protection?.check(signal)
+    // Real transports share a short cache; explicit fetch fixtures remain isolated.
+    if (!this.protection) return this.loadSettings(deviceId, signal)
+    const key = createHash('sha256').update(JSON.stringify([this.protection.home, this.credential.token, this.credential.cookie, this.credential.accountId, deviceId])).digest('hex')
+    let entry = settingsCache.get(key)
+    if (!entry || Date.now() - entry.at >= 60_000) {
+      if (settingsCache.size >= 128) settingsCache.delete(settingsCache.keys().next().value!)
+      entry = { at: Date.now(), value: this.loadSettings(deviceId, signal) }
+      settingsCache.set(key, entry)
+      const current = entry
+      void current.value.catch(() => { if (settingsCache.get(key) === current) settingsCache.delete(key) })
+    }
+    const value = await entry.value
+    signal.throwIfAborted()
+    await this.protection.check(signal)
+    return structuredClone(value)
+  }
+  private async loadSettings(deviceId: string, signal: AbortSignal): Promise<WebSettings> {
     const data = await this.json(`/api/v0/client/settings?${new URLSearchParams({ did: deviceId, scope: 'model' })}`, undefined, signal)
     if (!record(data) || !Number.isSafeInteger(data.version) || !record(data.settings)) throw new LlmError('Invalid official model settings.', 'WEB_PROTOCOL')
     const entry = data.settings.model_configs

@@ -1,3 +1,4 @@
+import { NetworkProtection } from '../local/network-protection.js'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -20,15 +21,21 @@ export function parseChallenge(value: unknown): Challenge {
   return v as unknown as Challenge
 }
 
-export async function loadWasm(signal?: AbortSignal, dependencies: { path?: string; fetch?: typeof fetch } = {}): Promise<Uint8Array> {
-  const path = dependencies.path ?? join(defaultHome(), 'cache', 'sha3.wasm')
+export async function loadWasm(signal?: AbortSignal, dependencies: { path?: string; fetch?: typeof fetch; protectionHome?: string } = {}): Promise<Uint8Array> {
+  const home = dependencies.protectionHome ?? defaultHome()
+  const protection = dependencies.protectionHome !== undefined || !dependencies.fetch ? new NetworkProtection(home) : undefined
+  const active = signal ?? new AbortController().signal
+  await protection?.check(active)
+  const path = dependencies.path ?? join(home, 'cache', 'sha3.wasm')
   let bytes: Uint8Array | undefined
   try { bytes = await readFile(path) }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new LlmError('Cannot read the proof-of-work cache.', 'POW_ASSET') }
   const valid = (data: Uint8Array) => createHash('sha256').update(data).digest('hex') === WASM_SHA256
   if (bytes && !valid(bytes)) throw new LlmError('Proof-of-work asset checksum mismatch. Remove the local cache and retry.', 'POW_ASSET')
   if (!bytes) {
-    const response = await (dependencies.fetch ?? fetch)(WASM_URL, { signal, redirect: 'error' })
+    const send = () => (dependencies.fetch ?? fetch)(WASM_URL, { signal: active, redirect: 'error' })
+    const response = protection ? await protection.run('/asset/pow', active, send) : await send()
+    await protection?.observe(response)
     if (!response.ok) throw new LlmError('Cannot download the official proof-of-work asset.', 'POW_ASSET')
     bytes = new Uint8Array(await response.arrayBuffer())
     if (!valid(bytes)) throw new LlmError('Official proof-of-work asset checksum mismatch.', 'POW_ASSET')
@@ -38,9 +45,9 @@ export async function loadWasm(signal?: AbortSignal, dependencies: { path?: stri
   return bytes
 }
 
-export async function solveChallenge(challenge: Challenge, signal: AbortSignal): Promise<string> {
+export async function solveChallenge(challenge: Challenge, signal: AbortSignal, dependencies: { protectionHome?: string } = {}): Promise<string> {
   signal.throwIfAborted()
-  const bytes = await loadWasm(signal)
+  const bytes = await loadWasm(signal, dependencies)
   const answer = await new Promise<number>((resolve, reject) => {
     const worker = new Worker(new URL('./pow-worker.js', import.meta.url), { workerData: { bytes, challenge }, execArgv: [] })
     let settled = false

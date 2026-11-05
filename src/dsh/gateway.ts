@@ -107,6 +107,12 @@ export class TokenFreeGateway extends TypertRemoteService {
   }
 
   @Remote
+  async pauseNetwork(): Promise<AccountStatus> { this.owner(); return this.account.pauseNetwork() }
+
+  @Remote
+  async resumeNetwork(confirmed: boolean): Promise<AccountStatus> { this.owner(); return this.account.resumeNetwork(confirmed) }
+
+  @Remote
   async status(): Promise<AccountStatus> { this.owner(); return this.account.refreshLocalStatus() }
 
   @Remote

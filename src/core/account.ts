@@ -1,3 +1,4 @@
+import { NetworkProtection, type ProtectionStatus } from '../local/network-protection.js'
 import { dirname, join } from 'node:path'
 import { rm } from 'node:fs/promises'
 import { TokenFreeError as LlmError } from '../core/errors.js'
@@ -19,6 +20,8 @@ interface AccountDependencies {
 
 /** One local account, with a single login/restore flight and no background keepalive. */
 export class LocalAccount {
+  private readonly protection: NetworkProtection
+  private protectionView?: ProtectionStatus
   private readonly file: string
   private readonly profile: string
   private readonly browser: BrowserLogin
@@ -37,17 +40,19 @@ export class LocalAccount {
 
   constructor(file = defaultCredentialFile(), dependencies: AccountDependencies = {}) {
     this.file = file
+    this.protection = new NetworkProtection(dirname(file))
     this.profile = join(dirname(file), 'browser-profile')
     this.log = dependencies.diagnostics ?? new LocalDiagnostics(dirname(file))
     this.browser = dependencies.browser ?? new ManagedBrowserLogin(this.profile, { diagnostics: this.log })
-    this.check = dependencies.check ?? ((credential, signal) => new DeepSeekWebClient(credential, { diagnostics: this.log }).check(signal))
+    this.check = dependencies.check ?? ((credential, signal) => new DeepSeekWebClient(credential, { diagnostics: this.log, protectionHome: dirname(file), login: true }).check(signal))
   }
 
-  status(): AccountStatus { return { ...this.view } }
+  status(): AccountStatus { return { ...this.view, ...(this.protectionView ? { protection: structuredClone(this.protectionView) } : {}) } }
   requestSignal(): AbortSignal { return this.generation.signal }
 
   /** Settings polling observes shared local login changes without network keepalive. */
   async refreshLocalStatus(): Promise<AccountStatus> {
+    this.protectionView = await this.protection.status()
     if (this.running || this.forgetting || this.lifetime.signal.aborted) return this.status()
     try {
       const credential = await new LocalStore(dirname(this.file)).credential(this.file)
@@ -88,6 +93,7 @@ export class LocalAccount {
       message: interactive ? '请在 DeepSeek Web 专用的官方窗口完成登录，成功后窗口会自动关闭。' : '正在恢复本插件保存的登录状态…' }
     this.running = (async () => {
       try {
+        await this.protection.check(signal, interactive)
         const store = new LocalStore(dirname(this.file))
         const epoch = (await store.account()).epoch
         signal.throwIfAborted()
@@ -154,6 +160,7 @@ export class LocalAccount {
 
   /** Called on demand, so idle time never spends chat quota or keeps sessions artificially alive. */
   async credential(signal: AbortSignal): Promise<WebCredential> {
+    await this.protection.check(signal)
     signal = AbortSignal.any([signal, this.lifetime.signal, this.generation.signal])
     signal.throwIfAborted()
     if (this.forgetting) throw new LlmError('正在退出本插件。', 'AUTH')
@@ -188,6 +195,7 @@ export class LocalAccount {
 
   /** Try the plugin-owned profile once; human verification opens only after an explicit login click. */
   async recover(rejected: WebCredential, signal: AbortSignal): Promise<WebCredential> {
+    await this.protection.check(signal)
     signal.throwIfAborted()
     const current = await new LocalStore(dirname(this.file)).credential(this.file)
     if (current?.epoch !== rejected.epoch || current?.token !== rejected.token) throw new LlmError('登录状态已变化，请重试本次请求。', 'ABORTED')
@@ -199,6 +207,8 @@ export class LocalAccount {
   }
 
   async restore(): Promise<AccountStatus> {
+    this.protectionView = await this.protection.status()
+    if (this.protectionView.mode === 'login-only' || this.protectionView.paused || this.protectionView.until > Date.now()) return this.refreshLocalStatus()
     if (this.forgetting) return this.status()
     if (!this.running) {
       try { await this.credential(this.lifetime.signal) } catch {
@@ -207,6 +217,18 @@ export class LocalAccount {
       }
     }
     return this.status()
+  }
+
+  async pauseNetwork(): Promise<AccountStatus> {
+    await this.protection.pause()
+    this.generation.abort(); this.generation = new AbortController()
+    await this.cancel()
+    return this.refreshLocalStatus()
+  }
+
+  async resumeNetwork(confirmed: boolean): Promise<AccountStatus> {
+    await this.protection.resume(confirmed)
+    return this.refreshLocalStatus()
   }
 
   async cancel(): Promise<AccountStatus> {
