@@ -15,8 +15,6 @@ export interface AccountActions {
   running?(sessionId: string): boolean
   cancelSummary?(sessionId: string, operationId: string, compactionId: string): Promise<void>
   operationStatus?(sessionId?: string): Promise<OperationStatus>
-  verifyPending?(sessionId: string, operationId: string): Promise<OperationStatus>
-  stopPending?(sessionId: string, operationId: string): Promise<OperationStatus>
   pauseNetwork?(): Promise<AccountStatus>
   resumeNetwork?(confirmed: boolean): Promise<AccountStatus>
   status(): Promise<AccountStatus>
@@ -125,7 +123,7 @@ export function AccountSettings({ actions }: { actions: AccountActions }) {
     actionSession.current = targetSession
     busy.current = true; const version = ++revision.current; setPending(name); setError('')
     try { await operation() }
-    catch { if (alive.current && (targetSession === undefined || version === revision.current && targetSession === actions.sessionId?.())) setError(name === '核实' ? '仍待核实' : name === '停止并核实' || name === '停止摘要' ? '停止尚未确认' : name === '使用' ? '启用未完成' : '操作未完成') }
+    catch { if (alive.current && (targetSession === undefined || version === revision.current && targetSession === actions.sessionId?.())) setError(name === '停止摘要' ? '停止尚未确认' : name === '使用' ? '启用未完成' : '操作未完成') }
     finally { if (targetSession === undefined || version === revision.current) { busy.current = false; actionSession.current = undefined; if (alive.current) setPending('') } }
   }
   const accountAction = async (action: () => Promise<AccountStatus>) => {
@@ -145,7 +143,7 @@ export function AccountSettings({ actions }: { actions: AccountActions }) {
     if (needsVerification || usage?.compaction === 'failed' || error || usage?.backend && usage.backend !== 'ready') dshText = '待处理'
   }
   const official = connected && !usageError && usage?.state === 'confirmed' && usage.count !== undefined ? `${number(usage.count)} tokens` : '—'
-  const officialTitle = error ? `${error}，请检查本地日志。` : needsVerification ? '原请求状态未确认；本会话的新生成暂停。核实不会重新发送问题。'
+  const officialTitle = error ? `${error}，请检查本地日志。` : needsVerification ? '原请求状态未确认；本会话的新生成暂停。'
     : `${usageError ? '以下为旧观测，不用于自动压缩判断。\n' : ''}${usageTitle(connected ? usage : undefined)}`
   const disabled = Boolean(pending) || hostError || !status
   const refreshSelection = async (id?: string) => {
@@ -164,8 +162,6 @@ export function AccountSettings({ actions }: { actions: AccountActions }) {
             const id = actions.sessionId?.(); await actions.enable!(id); await refreshSelection(id)
           }) }}>使用</button>}
           {activeSummary && sessionId && usage?.generation?.operationId && usage.generation.compactionId && actions.cancelSummary && <button disabled={disabled} onClick={() => { void run('停止摘要', () => actions.cancelSummary!(sessionId, usage!.generation!.operationId, usage!.generation!.compactionId!), sessionId) }}>停止摘要</button>}
-          {!networkBlocked && needsVerification && sessionId && operation?.operationId && actions.verifyPending && <button disabled={disabled} onClick={() => { void run('核实', async () => { const id = sessionId; const next = await actions.verifyPending!(id, operation.operationId!); if (alive.current && id === actions.sessionId?.()) setOperation(next) }, sessionId) }}>核实</button>}
-          {!networkBlocked && needsVerification && sessionId && operation?.operationId && actions.stopPending && <button disabled={disabled} title="停止原请求并核实，不会撤销已执行的工具" onClick={() => { void run('停止并核实', async () => { const id = sessionId; const next = await actions.stopPending!(id, operation.operationId!); if (alive.current && id === actions.sessionId?.()) setOperation(next) }, sessionId) }}>停止并核实</button>}
           {status?.busy ? <button disabled={disabled} onClick={() => { void run('取消', () => accountAction(() => actions.cancel())) }}>取消</button>
             : connected ? <button disabled={disabled} title="退出本机桌面、CLI 和 Web 的 DeepSeek Web 连接" onClick={() => { void run('退出', () => accountAction(() => actions.logout())) }}>退出</button>
               : <button data-primary disabled={disabled || networkBlocked} onClick={() => { void run('登录', () => accountAction(() => actions.login())) }}>登录</button>}
