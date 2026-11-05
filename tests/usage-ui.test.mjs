@@ -21,7 +21,6 @@ test('single card preserves official zero, rejects stale session values and canc
     modelType: 'default', thinking: true, budgetField: 'token_limit_with_thinking', settingsVersion: 7,
     lastObservation: { accumulated_token_usage: 0, source: 'history', chatId: 'chat-1', messageId: 2, observedAt: 'official-time' } }
   const cancelled = [], verified = [], operations = {}
-  let finishOldVerification
   const account = { state: 'connected', message: '', configured: true, busy: false }
   const actions = {
     sessionId: () => current, status: async () => account, restore: async () => account,
@@ -34,11 +33,8 @@ test('single card preserves official zero, rejects stale session values and canc
     },
     cancelSummary: async (...args) => { cancelled.push(args) },
     operationStatus: async id => operations[id] ?? { pending: false },
-    verifyPending: async (id, operationId) => {
-      verified.push([id, operationId])
-      if (id === 'three') return new Promise(resolve => { finishOldVerification = resolve })
-      return { pending: false }
-    },
+    verifyPending: async (...args) => { verified.push(args); return { pending: false } },
+    stopPending: async (...args) => { verified.push(args); return { pending: false } },
   }
   try {
     const ui = render(React.createElement(AccountSettings, { actions }))
@@ -83,16 +79,19 @@ test('single card preserves official zero, rejects stale session values and canc
     assert.equal(ui.getByTestId('tokenfree-usage').textContent.includes('9999'), false)
     await waitFor(() => assert.equal(ui.getByTestId('tokenfree-usage').textContent, '73 tokens'), { timeout: 2500 })
     operations.three = { pending: true, sessionId: 'three', operationId: 'three-op', stage: 'uncertain' }
-    await waitFor(() => assert.ok(ui.getByRole('button', { name: '核实' })), { timeout: 2500 })
-    fireEvent.click(ui.getByRole('button', { name: '核实' }))
-    await waitFor(() => assert.ok(finishOldVerification))
+    await waitFor(() => assert.equal(ui.getByTestId('tokenfree-state').textContent, '待处理'), { timeout: 2500 })
+    assert.equal(ui.queryByRole('button', { name: '核实' }), null)
+    assert.equal(ui.queryByRole('button', { name: '停止并核实' }), null)
+    assert.match(ui.getByTestId('tokenfree-usage').title, /原请求状态未确认；本会话的新生成暂停/)
     current = 'four'; reply = { state: 'confirmed', count: 44, automatic: false, reached: false }
     operations.four = { pending: true, sessionId: 'four', operationId: 'four-op', stage: 'uncertain' }
-    await waitFor(() => assert.equal(ui.getByRole('button', { name: '核实' }).disabled, false), { timeout: 2500 })
-    fireEvent.click(ui.getByRole('button', { name: '核实' }))
-    await waitFor(() => assert.deepEqual(verified, [['three', 'three-op'], ['four', 'four-op']]))
-    await React.act(async () => { finishOldVerification({ pending: true, sessionId: 'three', operationId: 'three-op', stage: 'uncertain' }) })
-    assert.match(ui.getByTestId('tokenfree-usage').title, /网页会话用量：44 tokens|原请求状态未确认/)
+    await waitFor(() => assert.equal(ui.getByTestId('tokenfree-usage').textContent, '44 tokens'), { timeout: 2500 })
+    await waitFor(() => assert.match(ui.getByTestId('tokenfree-usage').title, /原请求状态未确认/), { timeout: 2500 })
+    assert.equal(ui.queryByRole('button', { name: '核实' }), null)
+    assert.equal(ui.queryByRole('button', { name: '停止并核实' }), null)
+    assert.deepEqual(verified, [], 'pending display and session changes must not trigger recovery requests')
+    assert.equal(operations.three.pending, true)
+    assert.equal(operations.four.pending, true)
 
   } finally { cleanup(); dom.window.close(); await rm(dir, { recursive: true, force: true }) }
 })

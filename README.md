@@ -4,7 +4,7 @@
 
 安装包和源码通过本仓库公开提供。
 
-当前版本：**v1.6.1（仅离线验证）** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.6.2（仅离线验证）** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 ## 项目用途
 
@@ -71,7 +71,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.6.1.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.6.2.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。

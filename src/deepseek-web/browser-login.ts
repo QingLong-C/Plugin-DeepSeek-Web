@@ -84,14 +84,19 @@ export class ManagedBrowserLogin implements BrowserLogin {
     }
     const release = await acquireLock(join(dirname(this.profile), 'locks', 'browser'), AbortSignal.any([signal, AbortSignal.timeout(15_000)]))
     let polling = false, finished = false
+    const checks = new Set<Promise<void>>()
+    const track = (work: Promise<void>) => {
+      const pending = work.finally(() => { checks.delete(pending) })
+      checks.add(pending)
+    }
     const watch = setInterval(() => {
       if (polling || finished) return
       polling = true
-      void protection.check(signal, interactive).then(() => new LocalStore(dirname(this.profile)).account()).then(account => {
+      track(protection.check(signal, interactive).then(() => new LocalStore(dirname(this.profile)).account()).then(account => {
         if (!finished && epoch !== undefined && account.epoch !== epoch) revoked.abort(new LlmError('登录已被其他入口撤销，请重新登录。 [LOGIN_REVOKED]', 'LOGIN_REVOKED'))
       }).catch(error => {
         if (!finished) revoked.abort(error instanceof LlmError ? error : new LlmError('无法核实本机登录状态。', 'AUTH_STORAGE'))
-      }).finally(() => { polling = false })
+      }).finally(() => { polling = false }))
     }, 200)
     try {
       await mkdir(this.profile, { recursive: true, mode: 0o700 })
@@ -130,8 +135,8 @@ export class ManagedBrowserLogin implements BrowserLogin {
             catch (error) { if (!(error instanceof LlmError) || error.code !== 'ACCOUNT_LOGIN_ONLY') revoked.abort(error); await route.abort().catch(() => {}) }
           })
           this.context.on('response', response => {
-            void response.allHeaders().then(headers => response.status() >= 200 ? protection.observe(new Response(null, { status: response.status(), headers: { 'retry-after': headers['retry-after'] ?? '' } })) : undefined)
-              .catch(error => revoked.abort(error))
+            track(response.allHeaders().then(headers => response.status() >= 200 ? protection.observe(new Response(null, { status: response.status(), headers: { 'retry-after': headers['retry-after'] ?? '' } })) : undefined)
+              .catch(error => revoked.abort(error)))
           })
         }
         await protection.check(signal, interactive)
@@ -217,7 +222,9 @@ export class ManagedBrowserLogin implements BrowserLogin {
     } finally {
       finished = true
       if (watch) clearInterval(watch)
-      await release()
+      // The context is closed; finish admitted observations before releasing the
+      // login lease so logout/cleanup cannot race a late protection-file write.
+      try { await Promise.all(checks) } finally { await release() }
     }
   }
 

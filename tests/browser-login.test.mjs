@@ -128,3 +128,37 @@ test('another entry logout waits for the dedicated browser close before removing
     await assert.rejects(access(file))
   } finally { await owner.dispose(); await peer.dispose(); await rm(directory, { recursive: true, force: true }) }
 })
+
+test('login cleanup waits for an in-flight local protection check before returning', { timeout: 8000 }, async () => {
+  const { NetworkProtection } = await import('../lib/local/network-protection.js')
+  const directory = await mkdtemp(join(tmpdir(), 'tokenfree-login-drain-'))
+  const original = NetworkProtection.prototype.check
+  let calls = 0, entered, releaseCheck, closeSeen, done
+  const started = new Promise(resolve => { entered = resolve })
+  const held = new Promise(resolve => { releaseCheck = resolve })
+  const closed = new Promise(resolve => { closeSeen = resolve })
+  const drained = new Promise(resolve => { done = resolve })
+  NetworkProtection.prototype.check = async function (...args) {
+    if (++calls !== 4) return original.apply(this, args)
+    entered()
+    try { await held; return await original.apply(this, args) } finally { done() }
+  }
+  const page = { isClosed: () => false, url: () => 'https://chat.deepseek.com/', goto: async () => {}, bringToFront: async () => {}, evaluate: async () => { await started; return 'fixture-token' } }
+  const browser = new ManagedBrowserLogin(join(directory, 'browser-profile'), {
+    diagnostics: new LocalDiagnostics(directory, false),
+    launch: async () => ({ pages: () => [page], cookies: async () => [], close: async () => { closeSeen() } }),
+    check: async credential => { credential.accountId = 'fixture-account' },
+  })
+  let attempt, timer
+  try {
+    attempt = browser.obtain({ interactive: true, signal: AbortSignal.timeout(5000) })
+    await closed
+    const result = await Promise.race([attempt.then(() => 'returned'), new Promise(resolve => { timer = setTimeout(() => resolve('draining'), 150) })])
+    assert.equal(result, 'draining', 'login must not return while its local protection check is still active')
+    releaseCheck(); await attempt; await drained
+  } finally {
+    clearTimeout(timer); releaseCheck(); await attempt?.catch(() => {}); await drained
+    NetworkProtection.prototype.check = original
+    await browser.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+  }
+})
