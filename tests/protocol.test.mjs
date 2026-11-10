@@ -139,6 +139,33 @@ test('authentication, rate limits, redirects, and raw upstream errors never trig
   }
 })
 
+test('transient read-only GET transport failures retry at most twice, while POSTs are never replayed', async () => {
+  const transportFailure = () => Object.assign(new TypeError('fixture fetch failed'), { cause: { code: 'ECONNRESET' } })
+  let reads = 0
+  const recovering = new DeepSeekWebClient({ token: 'fixture-token' }, { fetch: async () => {
+    if (++reads === 1) throw transportFailure()
+    return envelope({ cache_control: 'REPLACE', chat_messages: [] })
+  } })
+  assert.deepEqual(await recovering.history('fixture-chat', AbortSignal.timeout(5000)), [])
+  assert.equal(reads, 2)
+
+  let failedReads = 0
+  const disconnected = new DeepSeekWebClient({ token: 'fixture-token' }, { fetch: async () => {
+    failedReads++
+    throw transportFailure()
+  } })
+  await assert.rejects(disconnected.history('fixture-chat', AbortSignal.timeout(5000)), error => error.code === 'TRANSPORT')
+  assert.equal(failedReads, 3)
+
+  let writes = 0
+  const post = new DeepSeekWebClient({ token: 'fixture-token' }, { fetch: async () => {
+    writes++
+    throw transportFailure()
+  } })
+  await assert.rejects(post.complete('hello', AbortSignal.timeout(1000)), error => error.code === 'TRANSPORT')
+  assert.equal(writes, 1)
+})
+
 test('official top-level authentication rejection survives an absent metadata data envelope', async () => {
   for (const code of [40001, 40002, 40003]) {
     for (const fields of [{ data: null }, {}, { data: 'not-an-envelope' }]) {

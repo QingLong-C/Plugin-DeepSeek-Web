@@ -9,10 +9,12 @@ import { failureCategory } from '../local/diagnostics.js'
 import type { LocalDiagnostics } from '../local/diagnostics.js'
 import type { WebEvent, WebIdentity, WebMessage, WebTransport, WebSettings, ImageRef, WebFile } from '../core/types.js'
 import { fileId, fileIds, imageRef } from '../core/images.js'
+import { setTimeout as delay } from 'node:timers/promises'
 
 import { retryAfterMs } from '../local/request-gate.js'
 
 const ORIGIN = 'https://chat.deepseek.com'
+const READ_ONLY_RETRY_DELAYS = [250, 750] as const
 const settingsCache = new Map<string, { at: number; value: Promise<WebSettings> }>()
 export type Fetch = typeof fetch
 export interface ClientDependencies {
@@ -82,10 +84,29 @@ export class DeepSeekWebClient implements WebTransport {
     if (body !== undefined && this.dependencies.operationId && !path.endsWith('/create_pow_challenge')) {
       this.dependencies.diagnostics?.content(this.dependencies.operationId, 'web.request', { method: 'POST', endpoint: path, body })
     }
+    const init: RequestInit & { signal: AbortSignal } = { method: body === undefined ? 'GET' : 'POST', headers: { ...this.headers(), ...extra },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal, redirect: 'error' }
     let response: Response
-    try { response = await this.protectedFetch(path, { method: body === undefined ? 'GET' : 'POST', headers: { ...this.headers(), ...extra },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal, redirect: 'error' }) }
-    catch (error) { this.dependencies.diagnostics?.write('http.failed', { ...meta, elapsedMs: Date.now() - startedAt, ...failureCategory(error) }); if (signal.aborted || error instanceof LlmError) throw error; throw new LlmError('Web transport disconnected; acceptance must be verified.', 'TRANSPORT') }
+    for (let attempt = 0;; attempt++) {
+      try { response = await this.protectedFetch(path, init); break }
+      catch (error) {
+        const elapsedMs = Date.now() - startedAt
+        const category = failureCategory(error)
+        this.dependencies.diagnostics?.write('http.failed', { ...meta, elapsedMs, ...category })
+        // Only idempotent, bodyless reads can be retried. Never replay generation,
+        // edits, uploads, or control POSTs whose server acceptance may be unknown.
+        const retryableTransport = error instanceof TypeError && ['dns', 'network', 'timeout', 'tls'].includes(category.errorKind ?? '')
+        const retryDelay = body === undefined && retryableTransport && !signal.aborted
+          ? READ_ONLY_RETRY_DELAYS[attempt] : undefined
+        if (retryDelay !== undefined) {
+          this.dependencies.diagnostics?.write('http.retry', { ...meta, attempt: attempt + 1, elapsedMs, ...category })
+          await delay(retryDelay, undefined, { signal })
+          continue
+        }
+        if (signal.aborted || error instanceof LlmError) throw error
+        throw new LlmError('Web transport disconnected; acceptance must be verified.', 'TRANSPORT')
+      }
+    }
     this.dependencies.diagnostics?.write('http.completed', { ...meta, elapsedMs: Date.now() - startedAt, httpStatus: response.status })
     if (!response.ok) {
       await response.body?.cancel()

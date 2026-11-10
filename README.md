@@ -4,7 +4,7 @@
 
 安装包和源码通过本仓库公开提供。
 
-当前版本：**v1.6.2（仅离线验证）** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
+当前版本：**v1.6.3（离线回归验证；未发送真实账号请求）** · [下载安装包](https://github.com/QingLong-C/Plugin-DeepSeek-Web/releases/latest) · [版本记录](CHANGELOG.md) · [维护指南](MAINTENANCE.md)
 
 ## 项目用途
 
@@ -15,6 +15,7 @@
 - 保存格式错误和通过校验的处理方式，重启后可复用对应格式提示；未解决问题保留待处理状态和本地日志关联。
 - 可选多模型格式修复接力：当前网页纠正失败后顺序调用配置的其他渠道，通过原始校验才继续；正常响应不调用后备模型。
 - 同账号请求排队，全量 HTTP 和生成共用累计预算；触及限流、挑战或预算时持久暂停，确认解封后由所有者恢复。详见 [账号保护](ACCOUNT_PROTECTION.md)。
+- 只读官网 GET 遇到瞬时传输断开时最多重试两次；生成、摘要、上传等 POST 不自动重放，累计请求预算保持不变。
 - 根据官网分支用量处理长对话压缩，保留模型路由与设置入口兼容修复。
 
 本版未进行真实账号测试，不承诺免受账号限制。受限期间禁止登录或请求探针；本人确认解封后可只正常登录，详见“仅登录”模式。
@@ -71,7 +72,7 @@ shasum -a 256 -c SHA256SUMS
 3. 备份后退出占用目标 profile 的 DSH。CLI 可用且该版本支持本地包安装时执行：
 
 ```sh
-dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.6.2.tgz
+dsh plugin --profile desktop add /ABSOLUTE/PATH/dsh-tokenfree-1.6.3.tgz
 ```
 
 如宿主不支持该本地路径形式，按 [profile vendor 安装说明](MAINTENANCE.md#下载和安装) 固定安装包及依赖，保留正常 `dsh-tokenfree` bundle；旧兼容包装入口需先迁移，避免重复加载。

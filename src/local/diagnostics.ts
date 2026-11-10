@@ -12,7 +12,7 @@ type DiagnosticEvent =
   | 'model.queued' | 'model.started' | 'model.recovering' | 'model.completed' | 'model.failed' | 'model.response' | 'model.format-repair' | 'model.format-memory'
   | 'content.queued' | 'policy.updated'
   | 'metrics.observed' | 'metrics.unavailable' | 'compaction.started' | 'compaction.failed'
-  | 'http.started' | 'http.completed' | 'http.failed'
+  | 'http.started' | 'http.completed' | 'http.failed' | 'http.retry'
   | 'operation.state' | 'operation.pending' | 'operation.committed' | 'stream.resuming' | 'stream.stopping' | 'stream.revised' | 'stream.withdrawn'
   | 'stream.stop-request-failed' | 'stream.stop-history-pending'
 export interface DiagnosticFields {

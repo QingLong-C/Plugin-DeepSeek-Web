@@ -137,7 +137,15 @@ test('official 50 percent triggers real native checkpoint, summarizes precise pr
   try {
     await f.ask('Remember OLD_FACT. ' + 'original context '.repeat(180))
     assert.equal(f.web.edits.length, 0)
+    let transientHistoryFailure = true
+    f.web.historyHook = async () => {
+      if (transientHistoryFailure) {
+        transientHistoryFailure = false
+        throw Object.assign(new TypeError('fixture fetch failed'), { cause: { code: 'ECONNRESET' } })
+      }
+    }
     await f.ask('RETAINED_TAIL_ONLY: continue the work')
+    assert.equal(transientHistoryFailure, false)
     const events = f.agent.session.snapshotEvents()
     assert.equal(f.web.edits.length, 1)
     assert.equal(f.web.edits[0].chat_session_id, 'chat-1')
